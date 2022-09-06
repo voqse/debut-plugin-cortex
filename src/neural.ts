@@ -30,23 +30,22 @@ export class Network {
     private gaussPathY: string;
 
     constructor(private opts: NetworkOptions) {
-        this.log = logger('neuro', opts);
+        this.log = logger('neuro-vision', opts);
         const nnOpts: INeuralNetworkOptions = {
             hiddenLayers: opts.hiddenLayers || [32, 16], // array of ints for the sizes of the hidden layers in the network
             activation: 'sigmoid', // supported activation types: ['sigmoid', 'relu', 'leaky-relu', 'tanh'],
             leakyReluAlpha: 0.01,
         };
         if (this.opts.crossValidate) {
-            this.log.info('Cross Validation network initializing...');
             // @ts-ignore
             this.crossValidate = new CrossValidate(NeuralNetwork, nnOpts);
+            this.log.debug('Cross Validation created');
         } else if (this.opts.LSTM) {
-            this.log.info('LSTM network initializing...');
-
             this.network = new recurrent.LSTMTimeStep(nnOpts);
+            this.log.debug('LSTM network created');
         } else {
-            this.log.info('Normal network initializing...');
             this.network = new NeuralNetwork(nnOpts);
+            this.log.debug('Normal network created');
         }
 
         this.gaussPathX = path.resolve(opts.workingDir, './gaussian-groups-x.json');
@@ -167,6 +166,7 @@ export class Network {
     }
 
     save() {
+        this.log.debug('Saving neurons schema...');
         const source = this.crossValidate || this.network;
         file.ensureFile(this.gaussPathX);
         file.ensureFile(this.gaussPathY);
@@ -174,19 +174,23 @@ export class Network {
         file.saveFile(this.gaussPathX, this.xDistribution);
         file.saveFile(this.gaussPathY, this.yDistribution);
         file.saveFile(this.layersPath, source.toJSON());
+        this.log.debug('Neurons schema saved');
     }
 
     restore() {
-        this.log.info('Restoring network...');
+        this.log.info('Loading neurons schema...');
+
         const groupsDataX = file.readFile(this.gaussPathX);
         const groupsDataY = file.readFile(this.gaussPathY);
         const nnLayersData = file.readFile(this.layersPath);
 
         if (!groupsDataX || !groupsDataY) {
+            this.log.error('Neurons schema load fail');
             throw 'Unknown data in gaussian-groups.json, or file does not exists, please run training before use';
         }
 
         if (!nnLayersData) {
+            this.log.error('Neurons schema load fail');
             throw 'Unknown data in nn-layers.json, or file does not exists, please run training before use';
         }
 
@@ -200,7 +204,7 @@ export class Network {
         } else {
             this.network.fromJSON(nnLayers);
         }
-        this.log.debug('Network restored');
+        this.log.debug('Neurons schema loaded');
     }
 
     training() {

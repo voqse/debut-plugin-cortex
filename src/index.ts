@@ -1,7 +1,7 @@
 import { Candle, PluginInterface } from '@debut/types';
+import { logger, LoggerOptions } from '@voqse/logger';
 import { cli } from '@debut/plugin-utils';
 import { Network } from './neural';
-import { logger, LoggerOptions } from '@voqse/logger';
 
 export enum NeuroVision {
     'HIGH_UPTREND',
@@ -41,7 +41,7 @@ export interface NeuroVisionPluginAPI {
 }
 
 export function neuroVisionPlugin(opts: NeuroVisionPluginOptions): NeuroVisionPluginInterface {
-    const log = logger('neuro', opts);
+    const log = logger('neuro-vision', opts);
     const neuroTrain = 'neuroTrain' in cli.getArgs<NeuroVisionPluginArgs>();
     let neuralNetwork: Network;
 
@@ -54,22 +54,17 @@ export function neuroVisionPlugin(opts: NeuroVisionPluginOptions): NeuroVisionPl
         },
 
         async onInit() {
-            log.info('Plugin initializing...');
+            log.info('Initializing plugin...');
             const botData = await cli.getBotData(this.debut.getName())!;
             const workingDir = `${botData?.src}/neuro-vision/${this.debut.opts.ticker}/`;
 
+            log.debug('Creating neural network...');
             neuralNetwork = new Network({ ...opts, workingDir });
 
             if (!neuroTrain) {
                 neuralNetwork.restore();
             }
         },
-
-        // async onStart() {
-        //     if (!neuroTrain) {
-        //         neuralNetwork.restore();
-        //     }
-        // },
 
         async onDispose() {
             log.info('Shutting down plugin...');
