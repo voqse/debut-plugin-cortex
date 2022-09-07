@@ -5,9 +5,9 @@ import { Candle } from '@debut/types';
 import path from 'path';
 import { logger, LoggerInterface } from '@voqse/logger';
 import { getDistribution, getQuoteRatioData, RatioCandle, DistributionSegment } from './utils';
-import { NeuroVision, NeuroVisionPluginOptions } from './index';
+import { NeuronsType, NeuronsPluginOptions } from './index';
 
-export interface NetworkOptions extends NeuroVisionPluginOptions {
+export interface NetworkOptions extends NeuronsPluginOptions {
     workingDir: string;
 }
 
@@ -119,7 +119,7 @@ export class Network {
     /**
      * Run forecast
      */
-    activate(xCandle: Candle, yCandle: Candle): NeuroVision | undefined {
+    activate(xCandle: Candle, yCandle: Candle): NeuronsType | undefined {
         const ratioXCandle = this.prevXCandle && getQuoteRatioData(xCandle, this.prevXCandle);
         const ratioYCandle = this.prevYCandle && getQuoteRatioData(yCandle, this.prevYCandle);
 

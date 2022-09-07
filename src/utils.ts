@@ -1,6 +1,6 @@
 import { Candle } from '@debut/types';
 import { math } from '@debut/plugin-utils';
-import { NeuroVision } from './index';
+import { NeuronsType } from './index';
 
 /**
  * Special candle format with ratio instead value
@@ -18,7 +18,7 @@ export interface DistributionSegment {
     ratioFrom: number;
     ratioTo: number;
     count: number;
-    classify: NeuroVision;
+    classify: NeuronsType;
 }
 
 /**
@@ -94,25 +94,25 @@ export function getDistribution(ratioCandles: RatioCandle[], segmentsCount = 6, 
     return segments;
 }
 
-function getGroup(idx: number, total: number): NeuroVision {
+function getGroup(idx: number, total: number): NeuronsType {
     // 5 statements in enum NeuroVision
     const visionStep = total / 5;
 
     if (idx < visionStep) {
-        return NeuroVision.HIGH_DOWNTREND;
+        return NeuronsType.HIGH_DOWNTREND;
     }
 
     if (idx < visionStep * 2) {
-        return NeuroVision.LOW_DOWNTREND;
+        return NeuronsType.LOW_DOWNTREND;
     }
 
     if (idx < visionStep * 3) {
-        return NeuroVision.NEUTRAL;
+        return NeuronsType.NEUTRAL;
     }
 
     if (idx < visionStep * 4) {
-        return NeuroVision.LOW_UPTREND;
+        return NeuronsType.LOW_UPTREND;
     }
 
-    return NeuroVision.HIGH_UPTREND;
+    return NeuronsType.HIGH_UPTREND;
 }

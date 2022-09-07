@@ -3,7 +3,9 @@ import { logger, LoggerOptions } from '@voqse/logger';
 import { cli } from '@debut/plugin-utils';
 import { Network } from './neural';
 
-export enum NeuroVision {
+export const pluginName = 'neurons';
+
+export enum NeuronsType {
     'HIGH_UPTREND',
     'LOW_UPTREND',
     'NEUTRAL',
@@ -11,11 +13,11 @@ export enum NeuroVision {
     'HIGH_DOWNTREND',
 }
 
-export interface NeuroVisionPluginArgs {
+export interface NeuronsPluginArgs {
     neuroTrain: boolean;
 }
 
-export interface NeuroVisionPluginOptions extends LoggerOptions {
+export interface NeuronsPluginOptions extends LoggerOptions {
     windowSize: number; // 25;
     segmentsCount: number; // 6
     precision: number; // 3
@@ -25,28 +27,28 @@ export interface NeuroVisionPluginOptions extends LoggerOptions {
     LSTM?: boolean;
 }
 
-interface NeuroVisionMethodsInterface {
-    nextValue(xCandle: Candle, yCandle: Candle): NeuroVision | undefined;
+interface NeuronsMethodsInterface {
+    nextValue(xCandle: Candle, yCandle: Candle): NeuronsType | undefined;
     addTrainValue(xCandle: Candle, yCandle: Candle): void;
     isTraining(): boolean;
 }
 
-interface NeuroVisionPluginInterface extends PluginInterface {
-    name: 'neuroVision';
-    api: NeuroVisionMethodsInterface;
+interface NeuronsPluginInterface extends PluginInterface {
+    name: string;
+    api: NeuronsMethodsInterface;
 }
 
-export interface NeuroVisionPluginAPI {
-    neuroVision: NeuroVisionMethodsInterface;
+export interface NeuronsPluginAPI {
+    [pluginName]: NeuronsMethodsInterface;
 }
 
-export function neuroVisionPlugin(opts: NeuroVisionPluginOptions): NeuroVisionPluginInterface {
-    const log = logger('neuro-vision', opts);
-    const neuroTrain = 'neuroTrain' in cli.getArgs<NeuroVisionPluginArgs>();
+export function neuronsPlugin(opts: NeuronsPluginOptions): NeuronsPluginInterface {
+    const log = logger(pluginName, opts);
+    const neuroTrain = 'neuroTrain' in cli.getArgs<NeuronsPluginArgs>();
     let neuralNetwork: Network;
 
     return {
-        name: 'neuroVision',
+        name: pluginName,
         api: {
             nextValue: (xCandle, yCandle) => neuralNetwork.activate(xCandle, yCandle),
             addTrainValue: (xCandle, yCandle) => neuralNetwork.addTrainingData(xCandle, yCandle),
@@ -56,7 +58,7 @@ export function neuroVisionPlugin(opts: NeuroVisionPluginOptions): NeuroVisionPl
         async onInit() {
             log.info('Initializing plugin...');
             const botData = await cli.getBotData(this.debut.getName())!;
-            const workingDir = `${botData?.src}/neuro-vision/${this.debut.opts.ticker}/`;
+            const workingDir = `${botData?.src}/${pluginName}/${this.debut.opts.ticker}/`;
 
             log.debug('Creating neural network...');
             neuralNetwork = new Network({ ...opts, workingDir });
