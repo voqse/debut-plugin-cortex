@@ -1,7 +1,7 @@
 import { Candle, PluginInterface } from '@debut/types';
 import { logger, LoggerOptions } from '@voqse/logger';
 import { cli } from '@debut/plugin-utils';
-import { Network } from './neural';
+import { Network } from './neural2';
 
 export const pluginName = 'neurons';
 
@@ -21,10 +21,10 @@ export interface NeuronsPluginOptions extends LoggerOptions {
     windowSize: number; // 25;
     segmentsCount: number; // 6
     precision: number; // 3
+    prediction: number; // 3
     hiddenLayers?: number[];
     debug?: boolean;
     crossValidate?: boolean;
-    LSTM?: boolean;
 }
 
 interface NeuronsMethodsInterface {
@@ -58,10 +58,10 @@ export function neuronsPlugin(opts: NeuronsPluginOptions): NeuronsPluginInterfac
         async onInit() {
             log.info('Initializing plugin...');
             const botData = await cli.getBotData(this.debut.getName())!;
-            const workingDir = `${botData?.src}/${pluginName}/${this.debut.opts.ticker}/`;
+            const neuronsDir = `${botData?.src}/${pluginName}/${this.debut.opts.ticker}/`;
 
             log.debug('Creating neural network...');
-            neuralNetwork = new Network({ ...opts, workingDir });
+            neuralNetwork = new Network({ ...opts, neuronsDir });
 
             if (!neuroTrain) {
                 neuralNetwork.restore();

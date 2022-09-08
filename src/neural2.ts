@@ -1,24 +1,27 @@
 // @ts-ignore
-import { CrossValidate, INeuralNetworkOptions, NeuralNetwork, recurrent } from 'brain.js';
+import { CrossValidate, NeuralNetworkGPU, recurrent, NeuralNetwork } from 'brain.js';
 import { file, math } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
 import path from 'path';
 import { logger, LoggerInterface } from '@voqse/logger';
+import { INeuralNetworkGPUOptions } from 'brain.js/dist/src/neural-network-gpu';
 import { getDistribution, getQuoteRatioData, RatioCandle, DistributionSegment } from './utils';
 import { NeuronsType, NeuronsPluginOptions } from './index';
 
 export interface NetworkOptions extends NeuronsPluginOptions {
-    workingDir: string;
+    neuronsDir: string;
+    neuronsMode?: 'cpu' | 'gpu';
 }
 
+let log: LoggerInterface;
+
 export class Network {
-    private log: LoggerInterface;
-    // @ts-ignore
-    private crossValidate: CrossValidate = null!;
-    // @ts-ignore
-    private network: NeuralNetwork = null!;
+    private network: NeuralNetworkGPU<number[], number[]>;
+    private crossValidate: CrossValidate<() => typeof this.network> = null!;
     private xDataset: RatioCandle[] = [];
     private yDataset: RatioCandle[] = [];
+    private xCloses: number[] = [];
+    private yCloses: number[] = [];
     private trainingSet: Array<{ input: number[]; output: number[] }> = [];
     private xDistribution: DistributionSegment[] = [];
     private yDistribution: DistributionSegment[] = [];
@@ -30,24 +33,28 @@ export class Network {
     private gaussPathY: string;
 
     constructor(private opts: NetworkOptions) {
-        this.log = logger('neuro-vision', opts);
-        const nnOpts: INeuralNetworkOptions = {
+        log = logger('neurons', opts);
+
+        const nnOpts: INeuralNetworkGPUOptions = {
             hiddenLayers: opts.hiddenLayers || [32, 16], // array of ints for the sizes of the hidden layers in the network
-            activation: 'sigmoid', // supported activation types: ['sigmoid', 'relu', 'leaky-relu', 'tanh'],
-            leakyReluAlpha: 0.01,
+            mode: opts.neuronsMode || 'gpu',
+            inputSize: opts.windowSize * 2,
+            outputSize: 1,
+            binaryThresh: 0.5,
+            // activation: 'sigmoid', // supported activation types: ['sigmoid', 'relu', 'leaky-relu', 'tanh'],
+            // leakyReluAlpha: 0.01,
         };
         if (this.opts.crossValidate) {
-            // @ts-ignore
-            this.crossValidate = new CrossValidate(NeuralNetwork, nnOpts);
-            this.log.debug('Cross Validation created');
+            this.crossValidate = new CrossValidate(() => new NeuralNetworkGPU(nnOpts));
+            log.debug('Cross Validation created');
         } else {
-            this.network = new NeuralNetwork(nnOpts);
-            this.log.debug('Normal network created');
+            this.network = new NeuralNetworkGPU(nnOpts);
+            log.debug('Normal network created');
         }
 
-        this.gaussPathX = path.resolve(opts.workingDir, './gaussian-groups-x.json');
-        this.gaussPathY = path.resolve(opts.workingDir, './gaussian-groups-y.json');
-        this.layersPath = path.resolve(opts.workingDir, './nn-layers.json');
+        this.gaussPathX = path.resolve(opts.neuronsDir, './gaussian-groups-x.json');
+        this.gaussPathY = path.resolve(opts.neuronsDir, './gaussian-groups-y.json');
+        this.layersPath = path.resolve(opts.neuronsDir, './nn-layers.json');
     }
 
     /**
@@ -57,11 +64,12 @@ export class Network {
         const ratioXCandle = this.prevXCandle && getQuoteRatioData(xCandle, this.prevXCandle);
         const ratioYCandle = this.prevYCandle && getQuoteRatioData(yCandle, this.prevYCandle);
 
-        if (ratioXCandle) {
+        if (ratioXCandle && ratioYCandle) {
             this.xDataset.push(ratioXCandle);
-        }
-        if (ratioYCandle) {
             this.yDataset.push(ratioYCandle);
+
+            this.xCloses.push(xCandle.c);
+            this.yCloses.push(yCandle.c);
         }
 
         this.prevXCandle = xCandle;
@@ -72,8 +80,10 @@ export class Network {
         this.xDistribution = getDistribution(this.xDataset, this.opts.segmentsCount, this.opts.precision);
         this.yDistribution = getDistribution(this.yDataset, this.opts.segmentsCount, this.opts.precision);
         if (this.opts.debug) {
-            this.log.debug(this.xDistribution, this.yDistribution);
+            log.debug(this.xDistribution, this.yDistribution);
         }
+
+        let distance = 0;
 
         for (let i = 0; i < this.xDataset.length; i++) {
             const ratioXCandle = this.xDataset[i];
@@ -98,19 +108,31 @@ export class Network {
                     break;
                 }
 
-                const outputGroupId = this.xDistribution.findIndex(
-                    (group) => forecastingRatio >= group.ratioFrom && forecastingRatio < group.ratioTo,
-                );
-                const normalizedOutput = this.normalize(outputGroupId);
+                const window = this.xCloses.slice(i + 1, i + 1 + this.opts.prediction);
+                if (window.length < this.opts.prediction) {
+                    break;
+                }
 
-                this.trainingSet.push({ input: [...this.input], output: [normalizedOutput] });
+                if (!distance) {
+                    const max = Math.max(...window);
+                    const min = Math.min(...window);
+
+                    const maxIndex = window.indexOf(max);
+                    const minIndex = window.indexOf(min);
+
+                    distance = maxIndex >= minIndex ? -minIndex : maxIndex;
+                } else {
+                    distance = distance > 0 ? distance - 1 : distance + 1;
+                }
+
+                this.trainingSet.push({ input: [...this.input], output: [distance] });
                 this.input.splice(0, 2);
-                // console.log('Input: ', [...this.input], ' Output: ', [...this.output]);
+                log.verbose('Input: ', [...this.input], ' Output: ', [distance]);
             }
 
             // this.input.push(this.normalize(groupId));
         }
-        this.log.debug('trainingSet length:', this.trainingSet.length);
+        log.debug('trainingSet length:', this.trainingSet.length);
     };
 
     /**
@@ -145,25 +167,15 @@ export class Network {
             this.input.push(groupXId, groupYId);
 
             if (this.input.length === this.opts.windowSize * 2) {
-                const forecast = this.network.run<number[], number[]>(this.input);
+                const forecast = this.network.run(this.input);
 
-                this.input.splice(0, 2);
-
-                const denormalized = this.denormalize(forecast[0]);
-                const group = this.xDistribution[denormalized];
-
-                if (!group) {
-                    this.log.debug(denormalized);
-                }
-
-                // console.log(`Neuro: ${group.classify} denormalized ${denormalized}`);
-                return group.classify;
+                return forecast[0];
             }
         }
     }
 
     save() {
-        this.log.debug('Saving neurons schema...');
+        log.debug('Saving neurons schema...');
         const source = this.crossValidate || this.network;
         file.ensureFile(this.gaussPathX);
         file.ensureFile(this.gaussPathY);
@@ -171,23 +183,23 @@ export class Network {
         file.saveFile(this.gaussPathX, this.xDistribution);
         file.saveFile(this.gaussPathY, this.yDistribution);
         file.saveFile(this.layersPath, source.toJSON());
-        this.log.debug('Neurons schema saved');
+        log.debug('Neurons schema saved');
     }
 
     restore() {
-        this.log.info('Loading neurons schema...');
+        log.info('Loading neurons schema...');
 
         const groupsDataX = file.readFile(this.gaussPathX);
         const groupsDataY = file.readFile(this.gaussPathY);
         const nnLayersData = file.readFile(this.layersPath);
 
         if (!groupsDataX || !groupsDataY) {
-            this.log.error('Neurons schema load fail');
+            log.error('Neurons schema load fail');
             throw 'Unknown data in gaussian-groups.json, or file does not exists, please run training before use';
         }
 
         if (!nnLayersData) {
-            this.log.error('Neurons schema load fail');
+            log.error('Neurons schema load fail');
             throw 'Unknown data in nn-layers.json, or file does not exists, please run training before use';
         }
 
@@ -201,7 +213,7 @@ export class Network {
         } else {
             this.network.fromJSON(nnLayers);
         }
-        this.log.debug('Neurons schema loaded');
+        log.debug('Neurons schema loaded');
     }
 
     training() {
@@ -209,13 +221,13 @@ export class Network {
 
         source.train(this.trainingSet, {
             // Defaults values --> expected validation
-            iterations: 20000, // the maximum times to iterate the training data --> number greater than 0
-            errorThresh: 0.01, // the acceptable error percentage from training data --> number between 0 and 1
+            iterations: 40000, // the maximum times to iterate the training data --> number greater than 0
+            errorThresh: 0.05, // the acceptable error percentage from training data --> number between 0 and 1
             log: true, // true to use console.log, when a function is supplied it is used --> Either true or a function
             logPeriod: 10, // iterations between logging out --> number greater than 0
             learningRate: 0.3, // scales with delta to effect training rate --> number between 0 and 1
             momentum: 0.1, // scales with next layer's change value --> number between 0 and 1
-            timeout: 1500000,
+            timeout: 3600000,
         });
 
         if (!this.network) {
