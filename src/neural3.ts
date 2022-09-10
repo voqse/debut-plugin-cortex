@@ -2,23 +2,22 @@
 import { CrossValidate, INeuralNetworkOptions, NeuralNetwork } from 'brain.js';
 import { file, math } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
-import path from 'path';
 import { logger, LoggerInterface } from '@voqse/logger';
-import { getDistribution, getQuoteRatioData, RatioCandle, DistributionSegment } from './utils';
+import path from 'path';
+import { getDistribution, getQuoteRatioData, RatioCandle, DistributionSegment, timeToNow, printStatus } from './utils';
 import { NeuronsType, NeuronsPluginOptions } from './index';
+
+let log: LoggerInterface;
 
 export interface NetworkOptions extends NeuronsPluginOptions {
     neuronsDir: string;
 }
-
-let log: LoggerInterface;
 
 export class Network {
     private network: NeuralNetwork<number[], number[]>;
     private crossValidate: CrossValidate<() => typeof this.network> = null!;
     private xDataset: RatioCandle[] = [];
     private yDataset: RatioCandle[] = [];
-    private xCloses: number[] = [];
     private trainingSet: Array<{ input: number[]; output: number[] }> = [];
     private xDistribution: DistributionSegment[] = [];
     private yDistribution: DistributionSegment[] = [];
@@ -62,8 +61,6 @@ export class Network {
         if (ratioXCandle && ratioYCandle) {
             this.xDataset.push(ratioXCandle);
             this.yDataset.push(ratioYCandle);
-
-            this.xCloses.push(xCandle.c);
         }
 
         this.prevXCandle = xCandle;
@@ -100,44 +97,14 @@ export class Network {
                     break;
                 }
 
-                const window = this.xCloses.slice(i + 1, i + 2 + this.opts.prediction);
-                if (window.length <= this.opts.prediction) {
-                    break;
-                }
-
-                const min = Math.min(...window);
-                const max = Math.max(...window);
-
-                const minIndex = window.indexOf(min);
-                const maxIndex = window.indexOf(max);
-
-                const diffMin = -window[minIndex] + this.xCloses[i];
-                const diffMax = window[maxIndex] - this.xCloses[i];
-
-                // if (diffMax > diffMin) {
-                //     distance = maxIndex + 1;
-                // } else if (diffMax < diffMin) {
-                //     distance = -minIndex - 1;
-                // } else {
-                //     distance = 0;
-                // }
-
-                const minOut = minIndex / this.opts.prediction;
-                const maxOut = maxIndex / this.opts.prediction;
-                // const normalized = math.toFixed(output, this.opts.precision);
-
-                this.trainingSet.push({ input: [...this.input], output: [minOut, maxOut] });
-                this.input.splice(0, 2);
-                // log.debug('Input: ', [...this.input], 'Output: ', [normalized]);
-                console.log(
-                    '[ ' + window.join(' -> ') + ' ]',
-                    ' (Distance:',
-                    `[${minIndex}]`,
-                    minOut,
-                    `[${maxIndex}]`,
-                    maxOut,
-                    ')',
+                const outputGroupId = this.xDistribution.findIndex(
+                    (group) => forecastingRatio >= group.ratioFrom && forecastingRatio < group.ratioTo,
                 );
+                const normalizedOutput = this.normalize(outputGroupId);
+
+                this.trainingSet.push({ input: [...this.input], output: [normalizedOutput] });
+                this.input.splice(0, 2);
+                // console.log('Input: ', [...this.input], ' Output: ', [normalizedOutput]);
             }
 
             // this.input.push(this.normalize(groupId));
@@ -148,7 +115,7 @@ export class Network {
     /**
      * Run forecast
      */
-    activate(xCandle: Candle, yCandle: Candle): number[] | undefined {
+    activate(xCandle: Candle, yCandle: Candle): NeuronsType {
         const ratioXCandle = this.prevXCandle && getQuoteRatioData(xCandle, this.prevXCandle);
         const ratioYCandle = this.prevYCandle && getQuoteRatioData(yCandle, this.prevYCandle);
 
@@ -181,7 +148,14 @@ export class Network {
 
                 this.input.splice(0, 2);
 
-                return forecast;
+                const denormalized = this.denormalize(forecast[0]);
+                const group = this.xDistribution[denormalized];
+
+                if (!group) {
+                    log.debug(denormalized);
+                }
+
+                return denormalized;
             }
         }
     }
@@ -200,7 +174,6 @@ export class Network {
 
     restore() {
         log.info('Loading neurons schema...');
-
         const groupsDataX = file.readFile(this.gaussPathX);
         const groupsDataY = file.readFile(this.gaussPathY);
         const nnLayersData = file.readFile(this.layersPath);
@@ -229,22 +202,40 @@ export class Network {
     }
 
     training() {
+        log.info('Starting training...');
         const source = this.crossValidate || this.network;
+        const startTime = new Date().getTime();
+        let prevTime = new Date().getTime();
+
+        const statuses = [];
+
+        const logStatus = ({ iterations, error }) => {
+            const now = new Date().getTime();
+            const speed = (10 * 1000) / (now - prevTime);
+
+            statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
+            if (statuses.length === 6) {
+                statuses.shift();
+            }
+            prevTime = now;
+            printStatus(statuses);
+        };
 
         source.train(this.trainingSet, {
             // Defaults values --> expected validation
             iterations: 40000, // the maximum times to iterate the training data --> number greater than 0
             errorThresh: 0.01, // the acceptable error percentage from training data --> number between 0 and 1
-            log: true, // true to use console.log, when a function is supplied it is used --> Either true or a function
+            log: logStatus, // true to use console.log, when a function is supplied it is used --> Either true or a function
             logPeriod: 10, // iterations between logging out --> number greater than 0
             learningRate: 0.3, // scales with delta to effect training rate --> number between 0 and 1
-            momentum: 0.1, // scales with next layer's change value --> number between 0 and 1
-            timeout: 3600000 * 2,
+            momentum: 0.2, // scales with next layer's change value --> number between 0 and 1
+            timeout: 3600000 * 4,
         });
 
         if (!this.network) {
             this.network = this.crossValidate.toNeuralNetwork();
         }
+        log.debug('Training finished');
     }
 
     private normalize(groupId: number) {

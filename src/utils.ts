@@ -1,6 +1,9 @@
 import { Candle } from '@debut/types';
-import { math } from '@debut/plugin-utils';
+import { date, math } from '@debut/plugin-utils';
 import { NeuronsType } from './index';
+import { INeuralNetworkState } from 'brain.js/dist/src/neural-network-types';
+import { stat } from 'fs';
+import * as readline from 'readline';
 
 /**
  * Special candle format with ratio instead value
@@ -115,4 +118,76 @@ function getGroup(idx: number, total: number): NeuronsType {
     }
 
     return NeuronsType.HIGH_UPTREND;
+}
+
+export function timeToNow(time: number): string {
+    const duration = new Date().getTime() - time;
+    const result = [];
+
+    const toNow = {
+        d: Math.floor(duration / (1000 * 60 * 60 * 24)),
+        h: Math.floor((duration % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60)),
+        m: Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60)),
+        s: Math.floor((duration % (1000 * 60)) / 1000),
+    };
+
+    for (const [key, value] of Object.entries(toNow)) {
+        if (!value) continue;
+        result.push(`${value}${key}`);
+    }
+
+    return result.join(' ');
+}
+
+export function printStatus(statuses: { totalTime; time; error; iterations; speed }[]) {
+    const last = [...statuses].pop();
+    const error = math.toFixed(last.error * 100);
+    const accuracy = math.toFixed(100 - error);
+
+    const statusRows = [];
+    const rows = [];
+
+    for (let i = 0; i < 5; i++) {
+        const status = statuses[i];
+
+        if (status) {
+            statusRows.push([
+                '| ',
+                `${status.iterations}`.padStart(9),
+                ' | ',
+                `${status.error}`.padStart(27),
+                ' | ',
+                `${status.time}`.padStart(9),
+                ' | ',
+                `${status.speed}`.padStart(22),
+                ' |',
+            ]);
+        } else {
+            statusRows.push(['|           |                             |           |                        |']);
+        }
+    }
+
+    rows.push(
+        ['+-----------+-----------------------------+-----------+------------------------+'],
+        ['| Iteration |              Training error | Exec.time |    Speed, iterations/s |'],
+        ['+===========+=============================+===========+========================+'],
+        ...statusRows,
+        ['+-----------+-----------------------------+-----------+------------------------+'],
+        [
+            `Training ${last.totalTime}`.padEnd(24),
+            `  `,
+            `Accuracy: ${accuracy}%  Error: ${error}% (${last.error})`.padStart(54),
+        ],
+    );
+
+    if (last.iterations > 10) {
+        readline.cursorTo(process.stdout, 0, process.stdout.rows - rows.length - 2);
+        readline.clearScreenDown(process.stdout);
+    }
+
+    for (const row of rows) {
+        process.stdout.write(row.join(''));
+        process.stdout.write('\n');
+    }
+    process.stdout.write('\n');
 }

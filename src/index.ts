@@ -1,7 +1,7 @@
 import { Candle, PluginInterface } from '@debut/types';
 import { logger, LoggerOptions } from '@voqse/logger';
 import { cli } from '@debut/plugin-utils';
-import { Network } from './neural2';
+import { Network } from './neural3';
 
 export const pluginName = 'neurons';
 
@@ -22,13 +22,14 @@ export interface NeuronsPluginOptions extends LoggerOptions {
     segmentsCount: number; // 6
     precision: number; // 3
     prediction: number; // 3
-    hiddenLayers?: number[];
     debug?: boolean;
+    hiddenLayers?: number[];
     crossValidate?: boolean;
 }
 
 interface NeuronsMethodsInterface {
-    nextValue(xCandle: Candle, yCandle: Candle): NeuronsType | undefined;
+    nextValue(xCandle: Candle, yCandle: Candle): number | undefined;
+    // momentValue(xCandle: Candle, yCandle: Candle): number[] | undefined;
     addTrainValue(xCandle: Candle, yCandle: Candle): void;
     isTraining(): boolean;
 }
