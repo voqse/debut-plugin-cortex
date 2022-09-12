@@ -150,34 +150,26 @@ export function printStatus(statuses: { totalTime; time; error; iterations; spee
     for (let i = 0; i < 5; i++) {
         const status = statuses[i];
 
-        if (status) {
-            statusRows.push([
-                '| ',
-                `${status.iterations}`.padStart(9),
-                ' | ',
-                `${status.error}`.padStart(27),
-                ' | ',
-                `${status.time}`.padStart(9),
-                ' | ',
-                `${status.speed}`.padStart(22),
-                ' |',
-            ]);
-        } else {
-            statusRows.push(['|           |                             |           |                        |']);
-        }
+        statusRows.push([
+            '│',
+            `${status?.iterations || ''}`.padStart(10),
+            '│',
+            `${status?.error || ''}`.padStart(29),
+            '│',
+            `${status?.time || ''}`.padStart(9),
+            '│',
+            `${status?.speed || ''}`.padStart(19),
+            '│',
+        ]);
     }
 
     rows.push(
-        ['+-----------+-----------------------------+-----------+------------------------+'],
-        ['| Iteration |              Training error | Exec.time |    Speed, iterations/s |'],
-        ['+===========+=============================+===========+========================+'],
+        ['┌────────────┬───────────────────────────────┬───────────┬─────────────────────┐'],
+        ['│ Iterations │                Training Error │ Exec.Time │ Speed, iterations/s │'],
+        ['├────────────┼───────────────────────────────┼───────────┼─────────────────────┤'],
         ...statusRows,
-        ['+-----------+-----------------------------+-----------+------------------------+'],
-        [
-            `Training ${last.totalTime}`.padEnd(24),
-            `  `,
-            `Accuracy: ${accuracy}%  Error: ${error}% (${last.error})`.padStart(54),
-        ],
+        ['└────────────┴───────────────────────────────┴───────────┴─────────────────────┘'],
+        [` Total time: ${last.totalTime}`.padEnd(24), `Accuracy: ${accuracy}%  Error: ${error}% `.padStart(54)],
     );
 
     if (last.iterations > 10) {
@@ -186,7 +178,7 @@ export function printStatus(statuses: { totalTime; time; error; iterations; spee
     }
 
     for (const row of rows) {
-        process.stdout.write(row.join(''));
+        process.stdout.write(row.join(' '));
         process.stdout.write('\n');
     }
     process.stdout.write('\n');

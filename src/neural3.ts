@@ -204,21 +204,21 @@ export class Network {
     training() {
         log.info('Starting training...');
         const source = this.crossValidate || this.network;
+        const statuses = [];
         const startTime = new Date().getTime();
         let prevTime = new Date().getTime();
 
-        const statuses = [];
-
         const logStatus = ({ iterations, error }) => {
             const now = new Date().getTime();
-            const speed = (10 * 1000) / (now - prevTime);
+            const speed = math.toFixed((10 * 1000) / (now - prevTime), 6);
 
-            statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
-            if (statuses.length === 6) {
+            if (statuses.length === 5) {
                 statuses.shift();
             }
-            prevTime = now;
+
+            statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
             printStatus(statuses);
+            prevTime = now;
         };
 
         source.train(this.trainingSet, {
@@ -229,7 +229,7 @@ export class Network {
             logPeriod: 10, // iterations between logging out --> number greater than 0
             learningRate: 0.3, // scales with delta to effect training rate --> number between 0 and 1
             momentum: 0.2, // scales with next layer's change value --> number between 0 and 1
-            timeout: 3600000 * 4,
+            timeout: 3600000 * 6,
         });
 
         if (!this.network) {
