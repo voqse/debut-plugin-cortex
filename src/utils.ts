@@ -169,7 +169,7 @@ export function printStatus(statuses: { totalTime; time; error; iterations; spee
         ['├────────────┼───────────────────────────────┼───────────┼─────────────────────┤'],
         ...statusRows,
         ['└────────────┴───────────────────────────────┴───────────┴─────────────────────┘'],
-        [` Total time: ${last.totalTime}`.padEnd(24), `Accuracy: ${accuracy}%  Error: ${error}% `.padStart(54)],
+        [` Total time: ${last.totalTime}`.padEnd(25), `Accuracy: ${accuracy}%  Error: ${error}% `.padStart(54)],
     );
 
     if (last.iterations > 10) {
