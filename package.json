@@ -24,14 +24,14 @@
     },
     "homepage": "https://github.com/voqse/debut-plugin-neurons#readme",
     "peerDependencies": {
-        "@debut/plugin-utils": "^2.0.0",
-        "@debut/types": "^4.0.2"
+        "@debut/plugin-utils": "^2.0.0"
     },
     "dependencies": {
         "@voqse/logger": "^1.0.4",
-        "brain.js": "2.0.0-beta.15"
+        "brain.js": "2.0.0-beta.16"
     },
     "devDependencies": {
+        "@debut/types": "^4.0.2",
         "@types/node": "^18.7.8",
         "husky": "^8.0.1",
         "prettier": "^2.7.1",
