@@ -1,8 +1,6 @@
 import { Candle } from '@debut/types';
-import { date, math } from '@debut/plugin-utils';
-import { NeuronsType } from './index';
-import { INeuralNetworkState } from 'brain.js/dist/src/neural-network-types';
-import { stat } from 'fs';
+import { math } from '@debut/plugin-utils';
+import { NeuroVision } from './index';
 import * as readline from 'readline';
 
 /**
@@ -21,7 +19,6 @@ export interface DistributionSegment {
     ratioFrom: number;
     ratioTo: number;
     count: number;
-    classify: NeuronsType;
 }
 
 /**
@@ -79,13 +76,10 @@ export function getDistribution(ratioCandles: RatioCandle[], segmentsCount = 6, 
         const nextSum = localCountSum + item.count;
 
         if ((nextSum > segmentSize && !isFilled) || isLast) {
-            const index = segments.length;
-
             segments.push({
                 ratioFrom,
                 ratioTo: item.ratio,
                 count: localCountSum,
-                classify: getGroup(index, segmentsCount),
             });
             localCountSum = item.count;
             ratioFrom = item.ratio;
@@ -97,27 +91,12 @@ export function getDistribution(ratioCandles: RatioCandle[], segmentsCount = 6, 
     return segments;
 }
 
-function getGroup(idx: number, total: number): NeuronsType {
-    // 5 statements in enum NeuroVision
-    const visionStep = total / 5;
-
-    if (idx < visionStep) {
-        return NeuronsType.HIGH_DOWNTREND;
-    }
-
-    if (idx < visionStep * 2) {
-        return NeuronsType.LOW_DOWNTREND;
-    }
-
-    if (idx < visionStep * 3) {
-        return NeuronsType.NEUTRAL;
-    }
-
-    if (idx < visionStep * 4) {
-        return NeuronsType.LOW_UPTREND;
-    }
-
-    return NeuronsType.HIGH_UPTREND;
+export function getPredictPrices(price: number, ratioFrom: number, ratioTo: number): NeuroVision {
+    return {
+        low: price * ratioFrom,
+        high: price * ratioTo,
+        avg: price * ((ratioFrom + ratioTo) / 2),
+    };
 }
 
 export function timeToNow(time: number): string {
@@ -151,24 +130,24 @@ export function printStatus(statuses: { totalTime; time; error; iterations; spee
         const status = statuses[i];
 
         statusRows.push([
-            '│',
+            '|',
             `${status?.iterations || ''}`.padStart(10),
-            '│',
+            '|',
             `${status?.error || ''}`.padStart(29),
-            '│',
+            '|',
             `${status?.time || ''}`.padStart(9),
-            '│',
+            '|',
             `${status?.speed || ''}`.padStart(19),
-            '│',
+            '|',
         ]);
     }
 
     rows.push(
-        ['┌────────────┬───────────────────────────────┬───────────┬─────────────────────┐'],
-        ['│ Iterations │                Training Error │ Exec.Time │ Speed, iterations/s │'],
-        ['├────────────┼───────────────────────────────┼───────────┼─────────────────────┤'],
+        ['+------------+-------------------------------+-----------+---------------------+'],
+        ['| Iterations |                Training Error | Exec.Time | Speed, iterations/s |'],
+        ['+------------+-------------------------------+-----------+---------------------+'],
         ...statusRows,
-        ['└────────────┴───────────────────────────────┴───────────┴─────────────────────┘'],
+        ['+------------+-------------------------------+-----------+---------------------+'],
         [` Total time: ${last.totalTime}`.padEnd(25), `Accuracy: ${accuracy}%  Error: ${error}% `.padStart(54)],
     );
 

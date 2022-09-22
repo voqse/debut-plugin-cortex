@@ -1,80 +1,84 @@
 import { Candle, PluginInterface } from '@debut/types';
-import { logger, LoggerOptions } from '@voqse/logger';
 import { cli } from '@debut/plugin-utils';
-import { Network } from './neural3';
+import { Network } from './neural';
+import { logger, LoggerOptions } from '@voqse/logger';
 
-export const pluginName = 'neurons';
-
-export enum NeuronsType {
-    'HIGH_UPTREND',
-    'LOW_UPTREND',
-    'NEUTRAL',
-    'LOW_DOWNTREND',
-    'HIGH_DOWNTREND',
+export interface NeuroVision {
+    low: number;
+    high: number;
+    avg: number;
 }
 
-export interface NeuronsPluginArgs {
+export interface NeuroVisionPluginArgs {
     neuroTrain: boolean;
 }
 
-export interface NeuronsPluginOptions extends LoggerOptions {
-    windowSize: number; // 25;
+export interface NeuroVisionPluginOptions extends LoggerOptions {
+    inputSize: number; // 25;
     segmentsCount: number; // 6
     precision: number; // 3
-    prediction: number; // 3
-    debug?: boolean;
+    prediction: number;
+    name?: string;
     hiddenLayers?: number[];
+    debug?: boolean;
     crossValidate?: boolean;
 }
 
-interface NeuronsMethodsInterface {
-    nextValue(xCandle: Candle, yCandle: Candle): number | undefined;
-    // momentValue(xCandle: Candle, yCandle: Candle): number[] | undefined;
-    addTrainValue(xCandle: Candle, yCandle: Candle): void;
+interface Methods {
+    momentValue(...candles: Candle[]): NeuroVision[] | undefined;
+    nextValue(...candles: Candle[]): NeuroVision[] | undefined;
+    addTrainValue(...candles: Candle[]): void;
     isTraining(): boolean;
 }
 
-interface NeuronsPluginInterface extends PluginInterface {
-    name: string;
-    api: NeuronsMethodsInterface;
+interface NeuroVisionPluginInterface extends PluginInterface {
+    name: 'neuroVision';
+    api: Methods;
 }
 
-export interface NeuronsPluginAPI {
-    [pluginName]: NeuronsMethodsInterface;
+export interface NeuroVisionPluginAPI {
+    neuroVision: Methods;
 }
 
-export function neuronsPlugin(opts: NeuronsPluginOptions): NeuronsPluginInterface {
-    const log = logger(pluginName, opts);
-    const neuroTrain = 'neuroTrain' in cli.getArgs<NeuronsPluginArgs>();
-    let neuralNetwork: Network;
+export function neuroVisionPlugin(params: NeuroVisionPluginOptions): NeuroVisionPluginInterface {
+    const log = logger('neuroVision', params);
+    const neuroTrain = 'neuroTrain' in cli.getArgs<NeuroVisionPluginArgs>();
+    let neural: Network;
 
     return {
-        name: pluginName,
+        name: 'neuroVision',
         api: {
-            nextValue: (xCandle, yCandle) => neuralNetwork.activate(xCandle, yCandle),
-            addTrainValue: (xCandle, yCandle) => neuralNetwork.addTrainingData(xCandle, yCandle),
-            isTraining: () => neuroTrain,
+            momentValue: (...candles: Candle[]) => neural.momentValue(...candles),
+            nextValue: (...candles: Candle[]) => neural.nextValue(...candles),
+            addTrainValue(...candles: Candle[]) {
+                neural.addTrainingData(...candles);
+            },
+            isTraining() {
+                return neuroTrain;
+            },
         },
 
         async onInit() {
             log.info('Initializing plugin...');
+
             const botData = await cli.getBotData(this.debut.getName())!;
-            const neuronsDir = `${botData?.src}/${pluginName}/${this.debut.opts.ticker}/`;
+            const workingDir = `${botData?.src}/neuro-vision/${this.debut.opts.ticker}/${params.name || 'default'}`;
 
             log.debug('Creating neural network...');
-            neuralNetwork = new Network({ ...opts, neuronsDir });
+            neural = new Network({ ...params, workingDir });
 
             if (!neuroTrain) {
-                neuralNetwork.restore();
+                neural.load();
             }
         },
 
         async onDispose() {
             log.info('Shutting down plugin...');
+
             if (neuroTrain) {
-                neuralNetwork.serveTrainingData();
-                neuralNetwork.training();
-                neuralNetwork.save();
+                neural.serveTrainingData();
+                neural.training();
+                neural.save();
             }
         },
     };
