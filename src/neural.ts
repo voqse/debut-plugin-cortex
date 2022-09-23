@@ -53,7 +53,7 @@ export class Network {
     /**
      * Add training set with ratios and forecast ratio as output
      */
-    addTrainingData = (...candles: Candle[]) => {
+    addTrainingData(...candles: Candle[]) {
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
 
@@ -64,7 +64,7 @@ export class Network {
 
             this.prevCandle[index] = candle;
         });
-    };
+    }
 
     serveTrainingData() {
         this.dataset.forEach((dataset, index) => {
@@ -108,7 +108,6 @@ export class Network {
 
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
-            this.prevCandle[index] = candle;
 
             if (ratioCandle) {
                 let groupId = this.distribution[index].findIndex(
@@ -177,6 +176,9 @@ export class Network {
      */
     nextValue(...candles: Candle[]) {
         this.input = this.getInput(...candles);
+        candles.forEach((candle, index) => {
+            this.prevCandle[index] = candle;
+        });
         return this.getOutput(this.input, ...candles);
     }
 
@@ -234,11 +236,11 @@ export class Network {
         source.train(this.trainingSet, {
             // Defaults values --> expected validation
             iterations: 40000, // the maximum times to iterate the training data --> number greater than 0
-            errorThresh: 0.005, // the acceptable error percentage from training data --> number between 0 and 1
+            errorThresh: 0.001, // the acceptable error percentage from training data --> number between 0 and 1
             log: logStatus, // true to use console.log, when a function is supplied it is used --> Either true or a function
             logPeriod: 10, // iterations between logging out --> number greater than 0
             learningRate: 0.3, // scales with delta to effect training rate --> number between 0 and 1
-            momentum: 0.2, // scales with next layer's change value --> number between 0 and 1
+            momentum: 0.1, // scales with next layer's change value --> number between 0 and 1
             timeout: 3600000 * 6,
         });
 
@@ -250,11 +252,11 @@ export class Network {
 
     private normalize(groupId: number) {
         // return groupId;
-        return math.toFixed(groupId / (this.params.segmentsCount - 1), this.params.precision);
+        return groupId / this.params.segmentsCount;
     }
 
     private denormalize(value: number) {
         // return Math.round(value);
-        return Math.min(Math.floor(value * this.params.segmentsCount), this.params.segmentsCount - 1);
+        return Math.min(Math.round(value * this.params.segmentsCount), this.params.segmentsCount - 1);
     }
 }
