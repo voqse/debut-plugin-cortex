@@ -1,6 +1,6 @@
 import * as tf from '@tensorflow/tfjs-node';
 import '@tensorflow/tfjs-backend-cpu';
-import { file, math } from '@debut/plugin-utils';
+import { file } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
 import path from 'path';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
@@ -33,19 +33,21 @@ export class Network {
     }
 
     createModel(options: Params): typeof this.model {
-        const { inputSize = 60, outputSize = 3, hiddenLayers = [32, 16] } = options;
+        const { inputSize = 60, outputSize = 3, hiddenLayers = [inputSize] } = options;
+        const inputUnits = hiddenLayers.shift();
         const model = tf.sequential();
+
         // Add a single input layer
-        model.add(tf.layers.dense({ inputShape: [inputSize], units: inputSize, useBias: true }));
+        model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits }));
         // Add hidden layers
-        hiddenLayers.forEach((layer) => {
-            model.add(tf.layers.dense({ units: layer, activation: 'relu' }));
+        hiddenLayers.forEach((units) => {
+            model.add(tf.layers.dense({ units, activation: 'relu' }));
         });
         // Add an output layer
-        model.add(tf.layers.dense({ units: outputSize, useBias: true }));
+        model.add(tf.layers.dense({ units: outputSize }));
 
         model.compile({
-            optimizer: tf.train.adam(),
+            optimizer: tf.train.momentum(0.3, 0.1),
             loss: tf.losses.meanSquaredError,
             metrics: ['accuracy'],
         });
