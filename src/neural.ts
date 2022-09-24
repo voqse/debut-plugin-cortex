@@ -247,24 +247,7 @@ export class Network {
 
     async training() {
         log.info('Starting training...');
-        // const statuses = [];
-        // const startTime = new Date().getTime();
-        // let prevTime = new Date().getTime();
-        //
-        // const logStatus = ({ iterations, error }) => {
-        //     const now = new Date().getTime();
-        //     const speed = math.toFixed((10 * 1000) / (now - prevTime), 6);
-        //
-        //     if (statuses.length === 5) {
-        //         statuses.shift();
-        //     }
-        //
-        //     statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
-        //     printStatus(statuses);
-        //     prevTime = now;
-        // };
-
-        console.log(this.trainingSet);
+        // console.log(this.trainingSet);
 
         const { batchSize, epochs } = this.params;
         const { inputs, outputs } = this.convertToTensor(this.trainingSet);
