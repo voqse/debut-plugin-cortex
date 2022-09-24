@@ -3,15 +3,7 @@ import '@tensorflow/tfjs-backend-cpu';
 import { file, math } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
 import path from 'path';
-import {
-    DistributionSegment,
-    getDistribution,
-    getPredictPrices,
-    getQuoteRatioData,
-    printStatus,
-    RatioCandle,
-    timeToNow,
-} from './utils';
+import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
 import { NeuroVision, NeuroVisionPluginOptions } from './index';
 import { logger, LoggerInterface, LoggerLevel } from '@voqse/logger';
 
@@ -150,7 +142,6 @@ export class Network {
 
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
-            this.prevCandle[index] = candle;
 
             if (ratioCandle) {
                 let groupId = this.distribution[index].findIndex(
@@ -177,7 +168,7 @@ export class Network {
 
     private getOutput(input: typeof this.input, ...candles: Candle[]): NeuroVision[] | undefined {
         const flattenedInput = input.flat();
-        console.log('Total input size:', flattenedInput.length);
+        // console.log('Total input size:', flattenedInput.length);
 
         if (flattenedInput.length === this.params.inputSize) {
             const forecast = tf.tidy(() => {
@@ -185,7 +176,7 @@ export class Network {
                 const prediction = this.model.predict(input) as tf.Tensor;
                 return Array.from(prediction.dataSync());
             });
-            console.log(forecast);
+            // console.log(forecast);
             const output: NeuroVision[] = [];
 
             for (let i = 0; i < forecast.length; i++) {
@@ -224,6 +215,9 @@ export class Network {
      */
     nextValue(...candles: Candle[]) {
         this.input = this.getInput(...candles);
+        candles.forEach((candle, index) => {
+            this.prevCandle[index] = candle;
+        });
         return this.getOutput(this.input, ...candles);
     }
 
