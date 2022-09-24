@@ -15,13 +15,12 @@ export interface NeuroVisionPluginArgs {
 
 export interface NeuroVisionPluginOptions extends LoggerOptions {
     inputSize: number; // 25;
+    outputSize?: number;
+    hiddenLayers: number[];
     segmentsCount: number; // 6
-    precision: number; // 3
-    prediction: number;
     name?: string;
-    hiddenLayers?: number[];
-    debug?: boolean;
-    crossValidate?: boolean;
+    batchSize?: number;
+    epochs?: number;
 }
 
 interface Methods {
@@ -68,7 +67,7 @@ export function neuroVisionPlugin(params: NeuroVisionPluginOptions): NeuroVision
             neural = new Network({ ...params, workingDir });
 
             if (!neuroTrain) {
-                neural.load();
+                await neural.load();
             }
         },
 
@@ -77,8 +76,8 @@ export function neuroVisionPlugin(params: NeuroVisionPluginOptions): NeuroVision
 
             if (neuroTrain) {
                 neural.serveTrainingData();
-                neural.training();
-                neural.save();
+                await neural.training();
+                await neural.save();
             }
         },
     };

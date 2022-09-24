@@ -1,5 +1,5 @@
-// @ts-ignore
-import { CrossValidate, INeuralNetworkOptions, NeuralNetwork } from 'brain.js';
+import * as tf from '@tensorflow/tfjs-node';
+import '@tensorflow/tfjs-backend-cpu';
 import { file, math } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
 import path from 'path';
@@ -22,8 +22,7 @@ interface Params extends NeuroVisionPluginOptions {
 }
 
 export class Network {
-    private network: NeuralNetwork<number[], number[]> = null!;
-    private crossValidate: CrossValidate<() => typeof this.network> = null!;
+    private model: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
     private distribution: DistributionSegment[][] = [];
@@ -35,19 +34,31 @@ export class Network {
     constructor(private params: Params) {
         log = logger('neurons', params);
 
-        const nnOpts: INeuralNetworkOptions = {
-            hiddenLayers: params.hiddenLayers || [32, 16], // array of ints for the sizes of the hidden layers in the network
-            activation: 'sigmoid', // supported activation types: ['sigmoid', 'relu', 'leaky-relu', 'tanh'],
-            leakyReluAlpha: 0.01,
-        };
-        if (this.params.crossValidate) {
-            this.crossValidate = new CrossValidate(() => new NeuralNetwork(nnOpts));
-        } else {
-            this.network = new NeuralNetwork(nnOpts);
-        }
+        this.model = this.createModel(params);
 
         this.gaussPath = path.resolve(params.workingDir, 'gaussian-groups.json');
-        this.layersPath = path.resolve(params.workingDir, 'nn-layers.json');
+        this.layersPath = path.resolve(params.workingDir);
+    }
+
+    createModel(options: Params): typeof this.model {
+        const { inputSize = 60, outputSize = 3, hiddenLayers = [32, 16] } = options;
+        const model = tf.sequential();
+        // Add a single input layer
+        model.add(tf.layers.dense({ inputShape: [inputSize], units: inputSize, useBias: true }));
+        // Add hidden layers
+        hiddenLayers.forEach((layer) => {
+            model.add(tf.layers.dense({ units: layer, activation: 'relu' }));
+        });
+        // Add an output layer
+        model.add(tf.layers.dense({ units: outputSize, useBias: true }));
+
+        model.compile({
+            optimizer: tf.train.adam(),
+            loss: tf.losses.meanSquaredError,
+            metrics: ['accuracy'],
+        });
+
+        return model;
     }
 
     /**
@@ -67,8 +78,13 @@ export class Network {
     }
 
     serveTrainingData() {
+        console.log('Candles count:', this.dataset.length);
+
+        const { inputSize, outputSize = 3 } = this.params;
+        const realInputSize = inputSize / this.dataset.length;
+
         this.dataset.forEach((dataset, index) => {
-            this.distribution[index] = getDistribution(dataset, this.params.segmentsCount, this.params.precision);
+            this.distribution[index] = getDistribution(dataset, this.params.segmentsCount);
 
             dataset.forEach((ratioCandle) => {
                 const groupId = this.distribution[index].findIndex(
@@ -82,11 +98,11 @@ export class Network {
         });
 
         for (
-            let windowStart = 0, windowEnd = this.params.inputSize;
-            windowEnd < this.input[0].length - this.params.prediction;
-            windowEnd = ++windowStart + this.params.inputSize
+            let windowStart = 0, windowEnd = realInputSize;
+            windowEnd < this.input[0].length - outputSize;
+            windowEnd = ++windowStart + realInputSize
         ) {
-            const output = [...this.input[0]].slice(windowEnd, windowEnd + this.params.prediction);
+            const output = [...this.input[0]].slice(windowEnd, windowEnd + outputSize);
             const input = this.input.map((input) => Array.from(input).slice(windowStart, windowEnd));
 
             this.trainingSet.push({ input: input.flat(), output });
@@ -103,11 +119,38 @@ export class Network {
         }
     }
 
+    convertToTensor(data) {
+        // Wrapping these calculations in a tidy will dispose any
+        // intermediate tensors.
+
+        return tf.tidy(() => {
+            // Step 1. Shuffle the data
+            tf.util.shuffle(data);
+
+            // Step 2. Convert data to Tensor
+            const inputs = data.map((d) => d.input);
+            const outputs = data.map((d) => d.output);
+
+            const inputTensor = tf.tensor2d(inputs);
+            const outputTensor = tf.tensor2d(outputs);
+
+            return {
+                inputs: inputTensor,
+                outputs: outputTensor,
+            };
+        });
+    }
+
     private getInput(...candles: Candle[]): typeof this.input {
+        console.log('Candles count:', candles.length);
+
         const input = [...this.input];
+        const { inputSize } = this.params;
+        const singleInputSize = inputSize / candles.length;
 
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
+            this.prevCandle[index] = candle;
 
             if (ratioCandle) {
                 let groupId = this.distribution[index].findIndex(
@@ -123,7 +166,7 @@ export class Network {
                 if (!input[index]) input[index] = [];
                 input[index].push(normalisedGroupId);
 
-                if (input[index].length > this.params.inputSize) {
+                if (input[index].length > singleInputSize) {
                     input[index].shift();
                 }
             }
@@ -133,11 +176,16 @@ export class Network {
     }
 
     private getOutput(input: typeof this.input, ...candles: Candle[]): NeuroVision[] | undefined {
-        const length = candles.length;
         const flattenedInput = input.flat();
+        console.log('Total input size:', flattenedInput.length);
 
-        if (flattenedInput.length === this.params.inputSize * length) {
-            const forecast = this.network.run(flattenedInput);
+        if (flattenedInput.length === this.params.inputSize) {
+            const forecast = tf.tidy(() => {
+                const input = tf.tensor2d(flattenedInput, [1, flattenedInput.length]);
+                const prediction = this.model.predict(input) as tf.Tensor;
+                return Array.from(prediction.dataSync());
+            });
+            console.log(forecast);
             const output: NeuroVision[] = [];
 
             for (let i = 0; i < forecast.length; i++) {
@@ -145,7 +193,7 @@ export class Network {
                 const denormalized = this.denormalize(cast);
                 const group = this.distribution[0][denormalized];
 
-                output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
+                if (group) output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
             if (this.params.logLevel === LoggerLevel.debug) {
@@ -176,77 +224,61 @@ export class Network {
      */
     nextValue(...candles: Candle[]) {
         this.input = this.getInput(...candles);
-        candles.forEach((candle, index) => {
-            this.prevCandle[index] = candle;
-        });
         return this.getOutput(this.input, ...candles);
     }
 
-    save() {
-        const source = this.crossValidate || this.network;
+    async save() {
         file.ensureFile(this.gaussPath);
-        file.ensureFile(this.layersPath);
+        // file.ensureFile(this.layersPath);
         file.saveFile(this.gaussPath, this.distribution);
-        file.saveFile(this.layersPath, source.toJSON());
+
+        await this.model.save(`file://${this.layersPath}`);
     }
 
-    load() {
+    async load() {
         const groupsData = file.readFile(this.gaussPath);
-        const nnLayersData = file.readFile(this.layersPath);
 
         if (!groupsData) {
             throw 'Unknown data in gaussian-groups.json, or file does not exists, please run training before use';
         }
-
-        if (!nnLayersData) {
-            throw 'Unknown data in nn-layers.json, or file does not exists, please run training before use';
-        }
-
-        const nnLayers = JSON.parse(nnLayersData);
-
         this.distribution = JSON.parse(groupsData);
-
-        if (this.params.crossValidate) {
-            this.network = this.crossValidate.fromJSON(nnLayers);
-        } else {
-            this.network.fromJSON(nnLayers);
-        }
+        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${this.layersPath}/model.json`);
     }
 
-    training() {
+    async training() {
         log.info('Starting training...');
-        const source = this.crossValidate || this.network;
-        const statuses = [];
-        const startTime = new Date().getTime();
-        let prevTime = new Date().getTime();
+        // const statuses = [];
+        // const startTime = new Date().getTime();
+        // let prevTime = new Date().getTime();
+        //
+        // const logStatus = ({ iterations, error }) => {
+        //     const now = new Date().getTime();
+        //     const speed = math.toFixed((10 * 1000) / (now - prevTime), 6);
+        //
+        //     if (statuses.length === 5) {
+        //         statuses.shift();
+        //     }
+        //
+        //     statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
+        //     printStatus(statuses);
+        //     prevTime = now;
+        // };
 
-        const logStatus = ({ iterations, error }) => {
-            const now = new Date().getTime();
-            const speed = math.toFixed((10 * 1000) / (now - prevTime), 6);
+        console.log(this.trainingSet);
 
-            if (statuses.length === 5) {
-                statuses.shift();
-            }
+        const { batchSize, epochs } = this.params;
+        const { inputs, outputs } = this.convertToTensor(this.trainingSet);
 
-            statuses.push({ totalTime: timeToNow(startTime), time: timeToNow(prevTime), iterations, error, speed });
-            printStatus(statuses);
-            prevTime = now;
-        };
-
-        source.train(this.trainingSet, {
-            // Defaults values --> expected validation
-            iterations: 40000, // the maximum times to iterate the training data --> number greater than 0
-            errorThresh: 0.001, // the acceptable error percentage from training data --> number between 0 and 1
-            log: logStatus, // true to use console.log, when a function is supplied it is used --> Either true or a function
-            logPeriod: 10, // iterations between logging out --> number greater than 0
-            learningRate: 0.3, // scales with delta to effect training rate --> number between 0 and 1
-            momentum: 0.1, // scales with next layer's change value --> number between 0 and 1
-            timeout: 3600000 * 6,
+        await this.model.fit(inputs, outputs, {
+            batchSize,
+            epochs,
+            shuffle: true,
+            // callbacks: {
+            //     onYield(...args) {
+            //         console.log(args);
+            //     },
+            // },
         });
-
-        if (!this.network) {
-            this.network = this.crossValidate.toNeuralNetwork();
-        }
         log.debug('Training finished');
     }
 
