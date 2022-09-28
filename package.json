@@ -1,7 +1,7 @@
 {
     "name": "debut-plugin-cortex",
     "version": "1.0.1",
-    "description": "Neural network trend forecasting",
+    "description": "Debut plugin for trend forecasting with neural network.",
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "keywords": [
