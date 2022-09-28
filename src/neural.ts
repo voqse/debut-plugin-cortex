@@ -47,7 +47,7 @@ export class Network {
         model.add(tf.layers.dense({ units: outputSize }));
 
         model.compile({
-            optimizer: tf.train.momentum(0.3, 0.1),
+            optimizer: tf.train.adam(),
             loss: tf.losses.meanSquaredError,
             metrics: ['accuracy'],
         });
@@ -72,9 +72,9 @@ export class Network {
     }
 
     serveTrainingData() {
-        console.log('Candles count:', this.dataset.length);
+        log.debug('Candles count:', this.dataset.length);
 
-        const { inputSize, outputSize = 3 } = this.params;
+        const { inputSize, outputSize = 3, logLevel } = this.params;
         const realInputSize = inputSize / this.dataset.length;
 
         this.dataset.forEach((dataset, index) => {
@@ -101,15 +101,17 @@ export class Network {
 
             this.trainingSet.push({ input: input.flat(), output });
 
-            const inputRows = input.map((row) => row.join(' '));
-            log.debug(
-                'Input:',
-                `\n${inputRows.join('\n')}`,
-                `(${input.flat().length})`,
-                '\nOutput:',
-                output.join(' '),
-                `(${output.length})`,
-            );
+            if (logLevel === LoggerLevel.debug) {
+                const inputRows = input.map((row) => row.join(' '));
+                log.debug(
+                    'Input:',
+                    `\n${inputRows.join('\n')}`,
+                    `(${input.flat().length})`,
+                    '\nOutput:',
+                    output.join(' '),
+                    `(${output.length})`,
+                );
+            }
         }
     }
 
@@ -136,7 +138,7 @@ export class Network {
     }
 
     private getInput(...candles: Candle[]): typeof this.input {
-        console.log('Candles count:', candles.length);
+        log.debug('Candles count:', candles.length);
 
         const input = [...this.input];
         const { inputSize } = this.params;
@@ -252,11 +254,6 @@ export class Network {
             batchSize,
             epochs,
             shuffle: true,
-            // callbacks: {
-            //     onYield(...args) {
-            //         console.log(args);
-            //     },
-            // },
         });
         log.debug('Training finished');
     }
