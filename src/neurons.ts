@@ -144,8 +144,7 @@ export class Neurons {
         log.debug('Candles count:', candles.length);
 
         const input = [...this.input];
-        const { inputSize } = this.opts;
-        const singleInputSize = inputSize / candles.length;
+        const singleInputSize = this.opts.inputSize / candles.length;
 
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
