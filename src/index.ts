@@ -1,7 +1,7 @@
+import { logger, LoggerOptions } from '@voqse/logger';
 import { Candle, PluginInterface } from '@debut/types';
 import { cli } from '@debut/plugin-utils';
-import { Cortex } from './cortex';
-import { logger, LoggerOptions } from '@voqse/logger';
+import { NeuronsOptions, Neurons } from './neurons';
 
 export interface CortexForecast {
     low: number;
@@ -13,14 +13,8 @@ export interface CortexPluginArgs {
     neuroTrain: boolean;
 }
 
-export interface CortexPluginOptions extends LoggerOptions {
-    inputSize: number; // 25;
-    outputSize?: number;
-    hiddenLayers: number[];
-    segmentsCount: number; // 6
+export interface CortexPluginOptions extends LoggerOptions, NeuronsOptions {
     name?: string;
-    batchSize?: number;
-    epochs?: number;
 }
 
 interface CortexPluginMethods {
@@ -39,30 +33,31 @@ export interface CortexPluginAPI {
     cortex: CortexPluginMethods;
 }
 
-export function cortexPlugin(params: CortexPluginOptions): CortexPluginInterface {
-    const log = logger('neuroVision', params);
+export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
+    const log = logger('cortex', opts);
+
     const isTraining = 'neuroTrain' in cli.getArgs<CortexPluginArgs>();
-    let neural: Cortex;
+    let neurons: Neurons;
 
     return {
         name: 'cortex',
         api: {
-            momentValue: (...candles) => neural.momentValue(...candles),
-            nextValue: (...candles) => neural.nextValue(...candles),
-            addTrainValue: (...candles) => neural.addTrainingData(...candles),
+            momentValue: (...candles) => neurons.momentValue(...candles),
+            nextValue: (...candles) => neurons.nextValue(...candles),
+            addTrainValue: (...candles) => neurons.addTrainingData(...candles),
             isTraining: () => isTraining,
         },
 
         async onInit() {
             log.info('Initializing plugin...');
             const botData = await cli.getBotData(this.debut.getName())!;
-            const workingDir = `${botData?.src}/neuro-vision/${this.debut.opts.ticker}/${params.name || 'default'}`;
+            const workingDir = `${botData?.src}/cortex/${this.debut.opts.ticker}/${opts.name || 'default'}`;
 
             log.debug('Creating neural network...');
-            neural = new Cortex({ ...params, workingDir });
+            neurons = new Neurons({ ...opts, workingDir });
 
             if (!isTraining) {
-                await neural.load();
+                await neurons.load();
             }
         },
 
@@ -70,9 +65,9 @@ export function cortexPlugin(params: CortexPluginOptions): CortexPluginInterface
             log.info('Shutting down plugin...');
 
             if (isTraining) {
-                neural.serveTrainingData();
-                await neural.training();
-                await neural.save();
+                neurons.serveTrainingData();
+                await neurons.training();
+                await neurons.save();
             }
         },
     };

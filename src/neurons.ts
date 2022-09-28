@@ -1,19 +1,25 @@
+import { logger, LoggerInterface, LoggerLevel, LoggerOptions } from '@voqse/logger';
+import { Candle } from '@debut/types';
+import { file } from '@debut/plugin-utils';
+import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
+import { CortexForecast } from './index';
 import * as tf from '@tensorflow/tfjs-node';
 import '@tensorflow/tfjs-backend-cpu';
-import { file } from '@debut/plugin-utils';
-import { Candle } from '@debut/types';
 import path from 'path';
-import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
-import { CortexForecast, CortexPluginOptions } from './index';
-import { logger, LoggerInterface, LoggerLevel } from '@voqse/logger';
 
 let log: LoggerInterface;
 
-interface Params extends CortexPluginOptions {
+export interface NeuronsOptions extends LoggerOptions {
     workingDir: string;
+    hiddenLayers: number[];
+    segmentsCount: number;
+    inputSize: number;
+    outputSize?: number;
+    batchSize?: number;
+    epochs?: number;
 }
 
-export class Cortex {
+export class Neurons {
     private model: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
@@ -23,16 +29,15 @@ export class Cortex {
     private layersPath: string;
     private gaussPath: string;
 
-    constructor(private params: Params) {
-        log = logger('neurons', params);
+    constructor(private opts: NeuronsOptions) {
+        log = logger('cortex/neurons', opts);
 
-        this.model = this.createModel(params);
-
-        this.gaussPath = path.resolve(params.workingDir, 'gaussian-groups.json');
-        this.layersPath = path.resolve(params.workingDir);
+        this.model = this.createModel(opts);
+        this.gaussPath = path.resolve(opts.workingDir, 'groups.json');
+        this.layersPath = path.resolve(opts.workingDir);
     }
 
-    createModel(options: Params): typeof this.model {
+    createModel(options: NeuronsOptions): typeof this.model {
         const { inputSize = 60, outputSize = 3, hiddenLayers = [inputSize] } = options;
         const inputUnits = hiddenLayers.shift();
         const model = tf.sequential();
@@ -74,11 +79,11 @@ export class Cortex {
     serveTrainingData() {
         log.debug('Candles count:', this.dataset.length);
 
-        const { inputSize, outputSize = 3, logLevel } = this.params;
+        const { inputSize, outputSize = 3, logLevel } = this.opts;
         const realInputSize = inputSize / this.dataset.length;
 
         this.dataset.forEach((dataset, index) => {
-            this.distribution[index] = getDistribution(dataset, this.params.segmentsCount);
+            this.distribution[index] = getDistribution(dataset, this.opts.segmentsCount);
 
             dataset.forEach((ratioCandle) => {
                 const groupId = this.distribution[index].findIndex(
@@ -141,7 +146,7 @@ export class Cortex {
         log.debug('Candles count:', candles.length);
 
         const input = [...this.input];
-        const { inputSize } = this.params;
+        const { inputSize } = this.opts;
         const singleInputSize = inputSize / candles.length;
 
         candles.forEach((candle, index) => {
@@ -174,7 +179,7 @@ export class Cortex {
         const flattenedInput = input.flat();
         // console.log('Total input size:', flattenedInput.length);
 
-        if (flattenedInput.length === this.params.inputSize) {
+        if (flattenedInput.length === this.opts.inputSize) {
             const forecast = tf.tidy(() => {
                 const input = tf.tensor2d(flattenedInput, [1, flattenedInput.length]);
                 const prediction = this.model.predict(input) as tf.Tensor;
@@ -191,7 +196,7 @@ export class Cortex {
                 if (group) output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
-            if (this.params.logLevel === LoggerLevel.debug) {
+            if (this.opts.logLevel === LoggerLevel.debug) {
                 const inputRows = input.map((row) => row.join(' '));
                 log.debug(
                     'Input:',
@@ -247,7 +252,7 @@ export class Cortex {
         log.info('Starting training...');
         // console.log(this.trainingSet);
 
-        const { batchSize, epochs } = this.params;
+        const { batchSize, epochs } = this.opts;
         const { inputs, outputs } = this.convertToTensor(this.trainingSet);
 
         await this.model.fit(inputs, outputs, {
@@ -260,11 +265,11 @@ export class Cortex {
 
     private normalize(groupId: number) {
         // return groupId;
-        return groupId / this.params.segmentsCount;
+        return groupId / this.opts.segmentsCount;
     }
 
     private denormalize(value: number) {
         // return Math.round(value);
-        return Math.min(Math.round(value * this.params.segmentsCount), this.params.segmentsCount - 1);
+        return Math.min(Math.round(value * this.opts.segmentsCount), this.opts.segmentsCount - 1);
     }
 }
