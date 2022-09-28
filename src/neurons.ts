@@ -10,9 +10,9 @@ import path from 'path';
 let log: LoggerInterface;
 
 export interface NeuronsOptions extends LoggerOptions {
-    hiddenLayers: number[];
-    segmentsCount: number;
-    inputSize: number;
+    segmentsCount?: number;
+    inputSize?: number;
+    hiddenLayers?: number[];
     outputSize?: number;
     batchSize?: number;
     epochs?: number;
@@ -26,26 +26,35 @@ export class Neurons {
     private distribution: DistributionSegment[][] = [];
     private prevCandle: Candle[] = [];
     private input: number[][] = [];
-    private layersPath: string;
-    private gaussPath: string;
+    private modelSavePath: string;
+    private gaussSavePath: string;
+    private opts: NeuronsOptions;
 
-    constructor(private opts: NeuronsOptions) {
-        log = logger('cortex/neurons', opts);
+    constructor(opts: NeuronsOptions) {
+        const defaultOpts: Partial<NeuronsOptions> = {
+            segmentsCount: 11,
+            inputSize: 20,
+            hiddenLayers: [32, 16, 8],
+            outputSize: 3,
+        };
 
-        this.model = this.createModel(opts);
-        this.gaussPath = path.resolve(opts.savePath, 'groups.json');
-        this.layersPath = path.resolve(opts.savePath);
+        this.opts = { ...defaultOpts, ...opts };
+        log = logger('cortex/neurons', this.opts);
+
+        this.model = this.createModel(this.opts);
+        this.gaussSavePath = path.resolve(this.opts.savePath, 'groups.json');
+        this.modelSavePath = path.resolve(this.opts.savePath);
     }
 
-    createModel(options: NeuronsOptions): typeof this.model {
-        const { inputSize = 60, outputSize = 3, hiddenLayers = [inputSize] } = options;
-        const inputUnits = hiddenLayers.shift();
+    private createModel(opts: Partial<NeuronsOptions>): typeof this.model {
+        const { inputSize, outputSize, hiddenLayers } = opts;
+        const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
         const model = tf.sequential();
 
         // Add a single input layer
         model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits }));
         // Add hidden layers
-        hiddenLayers.forEach((units) => {
+        hiddenUnits?.forEach((units) => {
             model.add(tf.layers.dense({ units, activation: 'relu' }));
         });
         // Add an output layer
@@ -63,7 +72,7 @@ export class Neurons {
     /**
      * Add training set with ratios and forecast ratio as output
      */
-    addTrainingData(...candles: Candle[]) {
+    addTrainingData(...candles: Candle[]): void {
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
 
@@ -76,10 +85,10 @@ export class Neurons {
         });
     }
 
-    serveTrainingData() {
+    serveTrainingData(): void {
         log.debug('Candles count:', this.dataset.length);
 
-        const { inputSize, outputSize = 3, logLevel } = this.opts;
+        const { inputSize, outputSize, logLevel } = this.opts;
         const realInputSize = inputSize / this.dataset.length;
 
         this.dataset.forEach((dataset, index) => {
@@ -120,7 +129,7 @@ export class Neurons {
         }
     }
 
-    convertToTensor(data) {
+    private convertToTensor(data: typeof this.trainingSet) {
         // Wrapping these calculations in a tidy will dispose any
         // intermediate tensors.
 
@@ -231,27 +240,23 @@ export class Neurons {
     }
 
     async save() {
-        file.ensureFile(this.gaussPath);
-        // file.ensureFile(this.layersPath);
-        file.saveFile(this.gaussPath, this.distribution);
-
-        await this.model.save(`file://${this.layersPath}`);
+        file.ensureFile(this.gaussSavePath);
+        file.saveFile(this.gaussSavePath, this.distribution);
+        await this.model.save(`file://${this.modelSavePath}`);
     }
 
     async load() {
-        const groupsData = file.readFile(this.gaussPath);
+        const groupsData = file.readFile(this.gaussSavePath);
 
         if (!groupsData) {
             throw 'Unknown data in gaussian-groups.json, or file does not exists, please run training before use';
         }
         this.distribution = JSON.parse(groupsData);
-        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${this.layersPath}/model.json`);
+        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${this.modelSavePath}/model.json`);
     }
 
     async training() {
         log.info('Starting training...');
-        // console.log(this.trainingSet);
-
         const { batchSize, epochs } = this.opts;
         const { inputs, outputs } = this.convertToTensor(this.trainingSet);
 
@@ -264,12 +269,10 @@ export class Neurons {
     }
 
     private normalize(groupId: number) {
-        // return groupId;
         return groupId / this.opts.segmentsCount;
     }
 
     private denormalize(value: number) {
-        // return Math.round(value);
         return Math.min(Math.round(value * this.opts.segmentsCount), this.opts.segmentsCount - 1);
     }
 }

@@ -1,7 +1,8 @@
 import { logger, LoggerOptions } from '@voqse/logger';
 import { Candle, PluginInterface } from '@debut/types';
 import { cli } from '@debut/plugin-utils';
-import { NeuronsOptions, Neurons } from './neurons';
+import path from 'path';
+import { Neurons, NeuronsOptions } from './neurons';
 
 export interface CortexForecast {
     low: number;
@@ -50,8 +51,9 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
 
         async onInit() {
             log.info('Initializing plugin...');
-            const botData = await cli.getBotData(this.debut.getName())!;
-            const { savePath = `${botData?.src}/cortex/${this.debut.opts.ticker}/${opts.name || 'default'}` } = opts;
+            const botData = (await cli.getBotData(this.debut.getName()))!;
+            const { savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, opts.name || 'default') } =
+                opts;
 
             log.debug('Creating neural network...');
             neurons = new Neurons({ ...opts, savePath });
@@ -62,13 +64,12 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
         },
 
         async onDispose() {
-            log.info('Shutting down plugin...');
-
             if (isTraining) {
                 neurons.serveTrainingData();
                 await neurons.training();
                 await neurons.save();
             }
+            log.info('Shutting down plugin...');
         },
     };
 }
