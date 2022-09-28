@@ -51,10 +51,10 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
         async onInit() {
             log.info('Initializing plugin...');
             const botData = await cli.getBotData(this.debut.getName())!;
-            const workingDir = `${botData?.src}/cortex/${this.debut.opts.ticker}/${opts.name || 'default'}`;
+            const { savePath = `${botData?.src}/cortex/${this.debut.opts.ticker}/${opts.name || 'default'}` } = opts;
 
             log.debug('Creating neural network...');
-            neurons = new Neurons({ ...opts, workingDir });
+            neurons = new Neurons({ ...opts, savePath });
 
             if (!isTraining) {
                 await neurons.load();

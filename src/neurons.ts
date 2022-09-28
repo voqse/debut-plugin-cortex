@@ -10,13 +10,13 @@ import path from 'path';
 let log: LoggerInterface;
 
 export interface NeuronsOptions extends LoggerOptions {
-    workingDir: string;
     hiddenLayers: number[];
     segmentsCount: number;
     inputSize: number;
     outputSize?: number;
     batchSize?: number;
     epochs?: number;
+    savePath?: string;
 }
 
 export class Neurons {
@@ -33,8 +33,8 @@ export class Neurons {
         log = logger('cortex/neurons', opts);
 
         this.model = this.createModel(opts);
-        this.gaussPath = path.resolve(opts.workingDir, 'groups.json');
-        this.layersPath = path.resolve(opts.workingDir);
+        this.gaussPath = path.resolve(opts.savePath, 'groups.json');
+        this.layersPath = path.resolve(opts.savePath);
     }
 
     createModel(options: NeuronsOptions): typeof this.model {

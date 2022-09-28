@@ -1,4 +1,4 @@
-# debut-plugin-neurons
+# debut-plugin-cortex
 
 [//]: # ([![CI]&#40;https://img.shields.io/github/workflow/status/voqse/debut-plugin-extra-candles/CI&#41;]&#40;https://github.com/voqse/debut-plugin-extra-candles/actions/workflows/ci.yml&#41;)
 
@@ -6,5 +6,5 @@
 
 ## Install
 ```shell
-npm install debut-plugin-neurons
+npm install debut-plugin-cortex
 ```
