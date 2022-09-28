@@ -20,6 +20,7 @@ export interface NeuronsOptions extends LoggerOptions {
 }
 
 export class Neurons {
+    private opts: NeuronsOptions;
     private model: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
@@ -28,7 +29,6 @@ export class Neurons {
     private input: number[][] = [];
     private modelSavePath: string;
     private gaussSavePath: string;
-    private opts: NeuronsOptions;
 
     constructor(opts: NeuronsOptions) {
         const defaultOpts: Partial<NeuronsOptions> = {
@@ -88,8 +88,8 @@ export class Neurons {
     serveTrainingData(): void {
         log.debug('Candles count:', this.dataset.length);
 
-        const { inputSize, outputSize, logLevel } = this.opts;
-        const realInputSize = inputSize / this.dataset.length;
+        const { inputSize, outputSize } = this.opts;
+        const candleInputSize = inputSize / this.dataset.length;
 
         this.dataset.forEach((dataset, index) => {
             this.distribution[index] = getDistribution(dataset, this.opts.segmentsCount);
@@ -106,48 +106,37 @@ export class Neurons {
         });
 
         for (
-            let windowStart = 0, windowEnd = realInputSize;
+            let windowStart = 0, windowEnd = candleInputSize;
             windowEnd < this.input[0].length - outputSize;
-            windowEnd = ++windowStart + realInputSize
+            windowEnd = ++windowStart + candleInputSize
         ) {
             const output = [...this.input[0]].slice(windowEnd, windowEnd + outputSize);
             const input = this.input.map((input) => Array.from(input).slice(windowStart, windowEnd));
 
             this.trainingSet.push({ input: input.flat(), output });
 
-            if (logLevel === LoggerLevel.debug) {
-                const inputRows = input.map((row) => row.join(' '));
-                log.debug(
-                    'Input:',
-                    `\n${inputRows.join('\n')}`,
-                    `(${input.flat().length})`,
-                    '\nOutput:',
-                    output.join(' '),
-                    `(${output.length})`,
-                );
-            }
+            log.debug(
+                'Input:',
+                `\n${input.map((row) => row.join(' ')).join('\n')}`,
+                `(${input.flat().length})`,
+                '\nOutput:',
+                output.join(' '),
+                `(${output.length})`,
+            );
         }
     }
 
     private convertToTensor(data: typeof this.trainingSet) {
-        // Wrapping these calculations in a tidy will dispose any
-        // intermediate tensors.
-
         return tf.tidy(() => {
-            // Step 1. Shuffle the data
             tf.util.shuffle(data);
 
-            // Step 2. Convert data to Tensor
-            const inputs = data.map((d) => d.input);
-            const outputs = data.map((d) => d.output);
+            const inputData = data.map((d) => d.input);
+            const outputData = data.map((d) => d.output);
 
-            const inputTensor = tf.tensor2d(inputs);
-            const outputTensor = tf.tensor2d(outputs);
+            const inputs = tf.tensor2d(inputData);
+            const outputs = tf.tensor2d(outputData);
 
-            return {
-                inputs: inputTensor,
-                outputs: outputTensor,
-            };
+            return { inputs, outputs };
         });
     }
 
@@ -186,7 +175,6 @@ export class Neurons {
 
     private getOutput(input: typeof this.input, ...candles: Candle[]): CortexForecast[] | undefined {
         const flattenedInput = input.flat();
-        // console.log('Total input size:', flattenedInput.length);
 
         if (flattenedInput.length === this.opts.inputSize) {
             const forecast = tf.tidy(() => {
@@ -194,7 +182,7 @@ export class Neurons {
                 const prediction = this.model.predict(input) as tf.Tensor;
                 return Array.from(prediction.dataSync());
             });
-            // console.log(forecast);
+
             const output: CortexForecast[] = [];
 
             for (let i = 0; i < forecast.length; i++) {
@@ -202,20 +190,20 @@ export class Neurons {
                 const denormalized = this.denormalize(cast);
                 const group = this.distribution[0][denormalized];
 
-                if (group) output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
+                if (!group) return;
+
+                output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
-            if (this.opts.logLevel === LoggerLevel.debug) {
-                const inputRows = input.map((row) => row.join(' '));
-                log.debug(
-                    'Input:',
-                    `\n${inputRows.join('\n')}`,
-                    `(${input.flat().length})`,
-                    '\nOutput:',
-                    forecast.join(' '),
-                    `(${forecast.length})`,
-                );
-            }
+            log.debug(
+                'Input:',
+                `\n${input.map((row) => row.join(' ')).join('\n')}`,
+                `(${input.flat().length})`,
+                '\nOutput:',
+                output.join(' '),
+                `(${output.length})`,
+            );
+
             return output;
         }
     }
@@ -240,12 +228,16 @@ export class Neurons {
     }
 
     async save() {
+        // TODO: 1. Make mode consistent
+        //       2. Handle errors
         file.ensureFile(this.gaussSavePath);
         file.saveFile(this.gaussSavePath, this.distribution);
         await this.model.save(`file://${this.modelSavePath}`);
     }
 
     async load() {
+        // TODO: 1. Make mode consistent
+        //       2. Handle errors
         const groupsData = file.readFile(this.gaussSavePath);
 
         if (!groupsData) {
