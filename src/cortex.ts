@@ -4,16 +4,16 @@ import { file } from '@debut/plugin-utils';
 import { Candle } from '@debut/types';
 import path from 'path';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
-import { NeuroVision, NeuroVisionPluginOptions } from './index';
+import { CortexForecast, CortexPluginOptions } from './index';
 import { logger, LoggerInterface, LoggerLevel } from '@voqse/logger';
 
 let log: LoggerInterface;
 
-interface Params extends NeuroVisionPluginOptions {
+interface Params extends CortexPluginOptions {
     workingDir: string;
 }
 
-export class Network {
+export class Cortex {
     private model: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
@@ -170,7 +170,7 @@ export class Network {
         return input;
     }
 
-    private getOutput(input: typeof this.input, ...candles: Candle[]): NeuroVision[] | undefined {
+    private getOutput(input: typeof this.input, ...candles: Candle[]): CortexForecast[] | undefined {
         const flattenedInput = input.flat();
         // console.log('Total input size:', flattenedInput.length);
 
@@ -181,7 +181,7 @@ export class Network {
                 return Array.from(prediction.dataSync());
             });
             // console.log(forecast);
-            const output: NeuroVision[] = [];
+            const output: CortexForecast[] = [];
 
             for (let i = 0; i < forecast.length; i++) {
                 const cast = forecast[i];

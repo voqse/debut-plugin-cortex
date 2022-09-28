@@ -1,5 +1,5 @@
 {
-    "name": "debut-plugin-neurons",
+    "name": "debut-plugin-cortex",
     "version": "1.0.1",
     "description": "Neural network trend forecasting",
     "main": "dist/index.js",
