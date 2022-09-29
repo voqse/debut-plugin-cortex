@@ -62,7 +62,7 @@ export class Neurons {
 
         model.compile({
             optimizer: tf.train.adam(),
-            loss: tf.losses.meanSquaredError,
+            loss: tf.losses.absoluteDifference,
             metrics: ['accuracy'],
         });
 
@@ -86,8 +86,6 @@ export class Neurons {
     }
 
     serveTrainingData(): void {
-        log.debug('Candles count:', this.dataset.length);
-
         const { inputSize, outputSize } = this.opts;
         const candleInputSize = inputSize / this.dataset.length;
 
@@ -115,7 +113,7 @@ export class Neurons {
 
             this.trainingSet.push({ input: input.flat(), output });
 
-            log.debug(
+            log.verbose(
                 'Input:',
                 `\n${input.map((row) => row.join(' ')).join('\n')}`,
                 `(${input.flat().length})`,
@@ -141,8 +139,6 @@ export class Neurons {
     }
 
     private getInput(...candles: Candle[]): typeof this.input {
-        log.debug('Candles count:', candles.length);
-
         const input = [...this.input];
         const singleInputSize = this.opts.inputSize / candles.length;
 
@@ -194,7 +190,7 @@ export class Neurons {
                 output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
-            log.debug(
+            log.verbose(
                 'Input:',
                 `\n${input.map((row) => row.join(' ')).join('\n')}`,
                 `(${input.flat().length})`,

@@ -26,7 +26,7 @@ interface CortexPluginMethods {
 }
 
 interface CortexPluginInterface extends PluginInterface {
-    name: 'cortex';
+    name: string;
     api: CortexPluginMethods;
 }
 
