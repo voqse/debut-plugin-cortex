@@ -1,4 +1,4 @@
-import { logger, LoggerInterface, LoggerLevel, LoggerOptions } from '@voqse/logger';
+import { logger, LoggerInterface, LoggerOptions } from '@voqse/logger';
 import { Candle } from '@debut/types';
 import { file } from '@debut/plugin-utils';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
@@ -9,7 +9,7 @@ import path from 'path';
 
 let log: LoggerInterface;
 
-export interface NeuronsOptions extends LoggerOptions {
+export interface ModelOptions extends LoggerOptions {
     segmentsCount?: number;
     inputSize?: number;
     hiddenLayers?: number[];
@@ -19,8 +19,8 @@ export interface NeuronsOptions extends LoggerOptions {
     savePath?: string;
 }
 
-export class Neurons {
-    private opts: NeuronsOptions;
+export class Model {
+    private opts: ModelOptions;
     private model: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
@@ -30,8 +30,8 @@ export class Neurons {
     private modelSavePath: string;
     private gaussSavePath: string;
 
-    constructor(opts: NeuronsOptions) {
-        const defaultOpts: Partial<NeuronsOptions> = {
+    constructor(opts: ModelOptions) {
+        const defaultOpts: Partial<ModelOptions> = {
             segmentsCount: 11,
             inputSize: 20,
             hiddenLayers: [32, 16, 8],
@@ -39,14 +39,14 @@ export class Neurons {
         };
 
         this.opts = { ...defaultOpts, ...opts };
-        log = logger('cortex/neurons', this.opts);
+        log = logger('cortex/model', this.opts);
 
         this.model = this.createModel(this.opts);
         this.gaussSavePath = path.resolve(this.opts.savePath, 'groups.json');
         this.modelSavePath = path.resolve(this.opts.savePath);
     }
 
-    private createModel(opts: Partial<NeuronsOptions>): typeof this.model {
+    private createModel(opts: Partial<ModelOptions>): typeof this.model {
         const { inputSize, outputSize, hiddenLayers } = opts;
         const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
         const model = tf.sequential();
@@ -59,9 +59,9 @@ export class Neurons {
         });
         // Add an output layer
         model.add(tf.layers.dense({ units: outputSize }));
-
         model.compile({
             optimizer: tf.train.adam(),
+            // TODO: Custom loss function
             loss: tf.losses.absoluteDifference,
             metrics: ['accuracy'],
         });
@@ -236,7 +236,8 @@ export class Neurons {
         const groupsData = file.readFile(this.gaussSavePath);
 
         if (!groupsData) {
-            throw 'Unknown data in gaussian-groups.json, or file does not exists, please run training before use';
+            log.error('Unknown data in gaussian-groups.json, or file does not exists, please run training before use');
+            process.exit(0);
         }
         this.distribution = JSON.parse(groupsData);
         this.model = <tf.Sequential>await tf.loadLayersModel(`file://${this.modelSavePath}/model.json`);

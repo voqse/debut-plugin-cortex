@@ -2,7 +2,7 @@ import { logger, LoggerOptions } from '@voqse/logger';
 import { Candle, PluginInterface } from '@debut/types';
 import { cli } from '@debut/plugin-utils';
 import path from 'path';
-import { Neurons, NeuronsOptions } from './neurons';
+import { Model, ModelOptions } from './model';
 
 export interface CortexForecast {
     low: number;
@@ -14,7 +14,7 @@ export interface CortexPluginArgs {
     neuroTrain: boolean;
 }
 
-export interface CortexPluginOptions extends LoggerOptions, NeuronsOptions {
+export interface CortexPluginOptions extends LoggerOptions, ModelOptions {
     name?: string;
 }
 
@@ -36,16 +36,15 @@ export interface CortexPluginAPI {
 
 export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
     const log = logger('cortex', opts);
-
     const isTraining = 'neuroTrain' in cli.getArgs<CortexPluginArgs>();
-    let neurons: Neurons;
+    let model: Model;
 
     return {
         name: 'cortex',
         api: {
-            momentValue: (...candles) => neurons.momentValue(...candles),
-            nextValue: (...candles) => neurons.nextValue(...candles),
-            addTrainValue: (...candles) => neurons.addTrainingData(...candles),
+            momentValue: (...candles) => model.momentValue(...candles),
+            nextValue: (...candles) => model.nextValue(...candles),
+            addTrainValue: (...candles) => model.addTrainingData(...candles),
             isTraining: () => isTraining,
         },
 
@@ -56,18 +55,18 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
                 opts;
 
             log.debug('Creating neural network...');
-            neurons = new Neurons({ ...opts, savePath });
+            model = new Model({ ...opts, savePath });
 
             if (!isTraining) {
-                await neurons.load();
+                await model.load();
             }
         },
 
         async onDispose() {
             if (isTraining) {
-                neurons.serveTrainingData();
-                await neurons.training();
-                await neurons.save();
+                model.serveTrainingData();
+                await model.training();
+                await model.save();
             }
             log.info('Shutting down plugin...');
         },
