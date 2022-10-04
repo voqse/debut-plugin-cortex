@@ -10,13 +10,14 @@ import path from 'path';
 let log: LoggerInterface;
 
 export interface ModelOptions extends LoggerOptions {
+    saveDir: string;
+    loadDir: string;
     segmentsCount?: number;
     inputSize?: number;
     hiddenLayers?: number[];
     outputSize?: number;
     batchSize?: number;
     epochs?: number;
-    savePath?: string;
 }
 
 export class Model {
@@ -27,8 +28,6 @@ export class Model {
     private distribution: DistributionSegment[][] = [];
     private prevCandle: Candle[] = [];
     private input: number[][] = [];
-    private modelSavePath: string;
-    private gaussSavePath: string;
 
     constructor(opts: ModelOptions) {
         const defaultOpts: Partial<ModelOptions> = {
@@ -40,10 +39,6 @@ export class Model {
 
         this.opts = { ...defaultOpts, ...opts };
         log = logger('cortex/model', this.opts);
-
-        this.model = this.createModel(this.opts);
-        this.gaussSavePath = path.resolve(this.opts.savePath, 'groups.json');
-        this.modelSavePath = path.resolve(this.opts.savePath);
     }
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
@@ -51,7 +46,7 @@ export class Model {
         const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
         const model = tf.sequential();
 
-        // Add a single input layer
+        // Add an input layer
         model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits }));
         // Add hidden layers
         hiddenUnits?.forEach((units) => {
@@ -59,19 +54,10 @@ export class Model {
         });
         // Add an output layer
         model.add(tf.layers.dense({ units: outputSize }));
-        model.compile({
-            optimizer: tf.train.adam(),
-            // TODO: Custom loss function
-            loss: tf.losses.absoluteDifference,
-            metrics: ['accuracy'],
-        });
 
         return model;
     }
 
-    /**
-     * Add training set with ratios and forecast ratio as output
-     */
     addTrainingData(...candles: Candle[]): void {
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
@@ -208,6 +194,7 @@ export class Model {
      */
     momentValue(...candles: Candle[]) {
         const input = this.getInput(...candles);
+
         return this.getOutput(input, ...candles);
     }
 
@@ -219,41 +206,68 @@ export class Model {
         candles.forEach((candle, index) => {
             this.prevCandle[index] = candle;
         });
+
         return this.getOutput(this.input, ...candles);
     }
 
-    async save() {
+    async saveModel() {
         // TODO: 1. Make mode consistent
         //       2. Handle errors
-        file.ensureFile(this.gaussSavePath);
-        file.saveFile(this.gaussSavePath, this.distribution);
-        await this.model.save(`file://${this.modelSavePath}`);
+        const { saveDir } = this.opts;
+
+        file.ensureFile(path.resolve(saveDir, 'groups.json'));
+        file.saveFile(path.resolve(saveDir, 'groups.json'), this.distribution);
+
+        await this.model.save(`file://${path.resolve(saveDir)}`);
     }
 
-    async load() {
-        // TODO: 1. Make mode consistent
-        //       2. Handle errors
-        const groupsData = file.readFile(this.gaussSavePath);
+    async loadModel() {
+        const { loadDir } = this.opts;
+        const groupsData = file.readFile(path.resolve(loadDir, 'groups.json'));
 
         if (!groupsData) {
-            log.error('Unknown data in gaussian-groups.json, or file does not exists, please run training before use');
+            log.error('Unknown data in groups.json, or file does not exists, please run training before use');
             process.exit(0);
         }
+
         this.distribution = JSON.parse(groupsData);
-        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${this.modelSavePath}/model.json`);
+        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
     }
 
     async training() {
+        try {
+            log.debug('Looking for existing model...');
+            await this.loadModel();
+            log.debug('Existing model loaded');
+        } catch (e) {
+            log.debug('No model found. Creating new one...');
+        }
+
+        if (!this.model) {
+            this.model = this.createModel(this.opts);
+        }
+
+        this.model.summary();
+        this.model.compile({
+            optimizer: tf.train.adam(),
+            // TODO: Custom loss function
+            loss: tf.losses.absoluteDifference,
+            metrics: ['accuracy'],
+        });
+
         log.info('Starting training...');
         const { batchSize, epochs } = this.opts;
         const { inputs, outputs } = this.convertToTensor(this.trainingSet);
 
-        await this.model.fit(inputs, outputs, {
+        const { history } = await this.model.fit(inputs, outputs, {
             batchSize,
             epochs,
             shuffle: true,
+            callbacks: tf.callbacks.earlyStopping({
+                monitor: 'acc',
+            }),
         });
-        log.debug('Training finished');
+        log.info('Training finished with accuracy:', history.acc.pop());
     }
 
     private normalize(groupId: number) {

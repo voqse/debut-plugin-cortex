@@ -14,8 +14,9 @@ export interface CortexPluginArgs {
     neuroTrain: boolean;
 }
 
-export interface CortexPluginOptions extends LoggerOptions, ModelOptions {
-    name?: string;
+export interface CortexPluginOptions extends LoggerOptions, Partial<ModelOptions> {
+    saveDir?: string;
+    loadDir?: string;
 }
 
 interface CortexPluginMethods {
@@ -51,14 +52,15 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
         async onInit() {
             log.info('Initializing plugin...');
             const botData = (await cli.getBotData(this.debut.getName()))!;
-            const { savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, opts.name || 'default') } =
-                opts;
+            const { saveDir = 'default', loadDir = saveDir } = opts;
+            const savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, saveDir);
+            const loadPath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, loadDir);
 
-            log.debug('Creating neural network...');
-            model = new Model({ ...opts, savePath });
+            // log.debug('Creating neural network...');
+            model = new Model({ ...opts, saveDir: savePath, loadDir: loadPath });
 
             if (!isTraining) {
-                await model.load();
+                await model.loadModel();
             }
         },
 
@@ -66,7 +68,7 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
             if (isTraining) {
                 model.serveTrainingData();
                 await model.training();
-                await model.save();
+                await model.saveModel();
             }
             log.info('Shutting down plugin...');
         },
