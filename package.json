@@ -24,6 +24,7 @@
     },
     "homepage": "https://github.com/voqse/debut-plugin-cortex#readme",
     "peerDependencies": {
+        "@debut/community-core": "^4.0.5",
         "@debut/plugin-utils": "^2.0.0"
     },
     "dependencies": {
@@ -31,7 +32,7 @@
         "@voqse/logger": "^1.0.6"
     },
     "devDependencies": {
-        "@debut/types": "^4.0.2",
+        "@debut/types": "^4.0.3",
         "@types/node": "^18.7.8",
         "husky": "^8.0.1",
         "prettier": "^2.7.1",
