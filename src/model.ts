@@ -12,9 +12,38 @@ let log: LoggerInterface;
 export interface ModelOptions extends LoggerOptions {
     saveDir: string;
     loadDir: string;
+
     segmentsCount?: number;
+    /**
+     * Size of window in candles for prediction.
+     *
+     * Defaults to 20.
+     */
     inputSize?: number;
+    /**
+     * Number of epochs with no improvement after which training will be stopped.
+     *
+     * Defaults to 100.
+     */
+    earlyStop?: number;
+    /**
+     * Array of positive integers, defines neurons count in each hidden layer.
+     *
+     * Defaults to [32, 16, 8].
+     */
     hiddenLayers?: number[];
+    /**
+     * Weather or not original layers will be frozen while new training. Works
+     * only with pretrained model and extra hiddenLayers provided.
+     *
+     * Defaults to true.
+     */
+    freezeLayers?: boolean;
+    /**
+     * Number of output candles.
+     *
+     * Defaults to 3.
+     */
     outputSize?: number;
     batchSize?: number;
     epochs?: number;
@@ -22,7 +51,8 @@ export interface ModelOptions extends LoggerOptions {
 
 export class Model {
     private opts: ModelOptions;
-    private model: tf.Sequential;
+    private model: tf.Sequential | tf.LayersModel;
+    private pretrainedModel: tf.Sequential;
     private dataset: RatioCandle[][] = [];
     private trainingSet: { input: number[]; output: number[] }[] = [];
     private distribution: DistributionSegment[][] = [];
@@ -33,7 +63,9 @@ export class Model {
         const defaultOpts: Partial<ModelOptions> = {
             segmentsCount: 11,
             inputSize: 20,
+            earlyStop: 100,
             hiddenLayers: [32, 16, 8],
+            freezeLayers: true,
             outputSize: 3,
         };
 
@@ -43,18 +75,37 @@ export class Model {
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
         const { inputSize, outputSize, hiddenLayers } = opts;
-        const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
         const model = tf.sequential();
 
-        // Add an input layer
-        model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits }));
-        // Add hidden layers
-        hiddenUnits?.forEach((units) => {
-            model.add(tf.layers.dense({ units, activation: 'relu' }));
-        });
-        // Add an output layer
-        model.add(tf.layers.dense({ units: outputSize }));
+        if (this.pretrainedModel) {
+            const layersCount = this.pretrainedModel.layers.length;
 
+            if (hiddenLayers.length <= layersCount) {
+                return this.pretrainedModel;
+            }
+
+            const outputLayer = this.pretrainedModel.getLayer(undefined, layersCount - 2);
+            const shavedModel = tf.model({ inputs: this.pretrainedModel.inputs, outputs: outputLayer.output });
+            const hiddenUnits = hiddenLayers.slice(layersCount - 1);
+
+            this.pretrainedModel.layers.forEach((layer) => {
+                layer.trainable = !this.opts.freezeLayers;
+            });
+
+            model.add(shavedModel);
+            hiddenUnits?.forEach((units, index) => {
+                model.add(tf.layers.dense({ units, activation: 'relu', name: `hidden-${index + layersCount - 2}` }));
+            });
+        } else {
+            const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
+
+            model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits, name: 'input' }));
+            hiddenUnits?.forEach((units, index) => {
+                model.add(tf.layers.dense({ units, activation: 'relu', name: `hidden-${index}` }));
+            });
+        }
+
+        model.add(tf.layers.dense({ units: outputSize, name: 'output' }));
         return model;
     }
 
@@ -72,6 +123,8 @@ export class Model {
     }
 
     serveTrainingData(): void {
+        log.info('Preparing training data...');
+
         const { inputSize, outputSize } = this.opts;
         const candleInputSize = inputSize / this.dataset.length;
 
@@ -160,7 +213,7 @@ export class Model {
         if (flattenedInput.length === this.opts.inputSize) {
             const forecast = tf.tidy(() => {
                 const input = tf.tensor2d(flattenedInput, [1, flattenedInput.length]);
-                const prediction = this.model.predict(input) as tf.Tensor;
+                const prediction = this.pretrainedModel.predict(input) as tf.Tensor;
                 return Array.from(prediction.dataSync());
             });
 
@@ -211,27 +264,27 @@ export class Model {
     }
 
     async saveModel() {
-        // TODO: 1. Make mode consistent
-        //       2. Handle errors
         const { saveDir } = this.opts;
+        const groupsFile = 'groups.json';
 
-        file.ensureFile(path.resolve(saveDir, 'groups.json'));
-        file.saveFile(path.resolve(saveDir, 'groups.json'), this.distribution);
+        file.ensureFile(path.resolve(saveDir, groupsFile));
+        file.saveFile(path.resolve(saveDir, groupsFile), this.distribution);
 
         await this.model.save(`file://${path.resolve(saveDir)}`);
     }
 
     async loadModel() {
         const { loadDir } = this.opts;
-        const groupsData = file.readFile(path.resolve(loadDir, 'groups.json'));
+        const groupsFile = 'groups.json';
+        const groupsData = file.readFile(path.resolve(loadDir, groupsFile));
 
         if (!groupsData) {
-            log.error('Unknown data in groups.json, or file does not exists, please run training before use');
+            log.error(`Unknown data in ${groupsFile}, or file does not exists, please run training before use`);
             process.exit(0);
         }
 
         this.distribution = JSON.parse(groupsData);
-        this.model = <tf.Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
+        this.pretrainedModel = <tf.Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
     }
 
     async training() {
@@ -243,10 +296,7 @@ export class Model {
             log.debug('No model found. Creating new one...');
         }
 
-        if (!this.model) {
-            this.model = this.createModel(this.opts);
-        }
-
+        this.model = this.createModel(this.opts);
         this.model.summary();
         this.model.compile({
             optimizer: tf.train.adam(),
@@ -264,7 +314,8 @@ export class Model {
             epochs,
             shuffle: true,
             callbacks: tf.callbacks.earlyStopping({
-                monitor: 'acc',
+                monitor: 'loss',
+                patience: this.opts.earlyStop,
             }),
         });
         log.info('Training finished with accuracy:', history.acc.pop());
