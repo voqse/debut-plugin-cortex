@@ -279,8 +279,8 @@ export class Model {
         const groupsData = file.readFile(path.resolve(loadDir, groupsFile));
 
         if (!groupsData) {
-            log.error(`Unknown data in ${groupsFile}, or file does not exists, please run training before use`);
-            process.exit(0);
+            throw `Unknown data in ${groupsFile}, or file does not exists, please run training before use`;
+            // process.exit(0);
         }
 
         this.distribution = JSON.parse(groupsData);
