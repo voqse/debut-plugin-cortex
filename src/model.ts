@@ -33,6 +33,12 @@ export interface ModelOptions extends LoggerOptions {
      */
     hiddenLayers?: number[];
     /**
+     * Array of positive integers, defines layers to add to existing model in next training.
+     *
+     * Defaults to [32, 16, 8].
+     */
+    additionalLayers?: number[];
+    /**
      * Weather or not original layers will be frozen while new training. Works
      * only with pretrained model and extra hiddenLayers provided.
      *
@@ -74,26 +80,26 @@ export class Model {
     }
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
-        const { inputSize, outputSize, hiddenLayers } = opts;
+        const { inputSize, outputSize, hiddenLayers, additionalLayers } = opts;
         const model = tf.sequential();
 
         if (this.pretrainedModel) {
             const layersCount = this.pretrainedModel.layers.length;
 
-            if (hiddenLayers.length <= layersCount) {
+            if (!additionalLayers?.length) {
                 return this.pretrainedModel;
             }
+            log.info('Additional layers provided. Inserting...');
 
             const outputLayer = this.pretrainedModel.getLayer(undefined, layersCount - 2);
             const shavedModel = tf.model({ inputs: this.pretrainedModel.inputs, outputs: outputLayer.output });
-            const hiddenUnits = hiddenLayers.slice(layersCount - 1);
 
             this.pretrainedModel.layers.forEach((layer) => {
                 layer.trainable = !this.opts.freezeLayers;
             });
 
             model.add(shavedModel);
-            hiddenUnits?.forEach((units, index) => {
+            additionalLayers?.forEach((units, index) => {
                 model.add(tf.layers.dense({ units, activation: 'relu', name: `hidden-${index + layersCount - 2}` }));
             });
         } else {
