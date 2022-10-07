@@ -52,7 +52,7 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
         async onInit() {
             log.info('Initializing plugin...');
             const botData = (await cli.getBotData(this.debut.getName()))!;
-            const { saveDir = 'default', loadDir = saveDir } = opts;
+            const { loadDir = 'default', saveDir = loadDir } = opts;
             const savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, saveDir);
             const loadPath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, loadDir);
 
