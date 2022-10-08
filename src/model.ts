@@ -158,14 +158,14 @@ export class Model {
 
             this.trainingSet.push({ input: input.flat(), output });
 
-            log.verbose(
-                'Input:',
-                `\n${input.map((row) => row.join(' ')).join('\n')}`,
-                `(${input.flat().length})`,
-                '\nOutput:',
-                output.join(' '),
-                `(${output.length})`,
-            );
+            // log.verbose(
+            //     'Input:',
+            //     `\n${input.map((row) => row.join(' ')).join('\n')}`,
+            //     `(${input.flat().length})`,
+            //     '\nOutput:',
+            //     output.join(' '),
+            //     `(${output.length})`,
+            // );
         }
     }
 
@@ -235,14 +235,14 @@ export class Model {
                 output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
-            log.verbose(
-                'Input:',
-                `\n${input.map((row) => row.join(' ')).join('\n')}`,
-                `(${input.flat().length})`,
-                '\nOutput:',
-                output.join(' '),
-                `(${output.length})`,
-            );
+            // log.verbose(
+            //     'Input:',
+            //     `\n${input.map((row) => row.join(' ')).join('\n')}`,
+            //     `(${input.flat().length})`,
+            //     '\nOutput:',
+            //     output.join(' '),
+            //     `(${output.length})`,
+            // );
 
             return output;
         }
@@ -305,7 +305,7 @@ export class Model {
         this.model = this.createModel(this.opts);
         this.model.summary();
         this.model.compile({
-            optimizer: tf.train.adam(),
+            optimizer: tf.train.adadelta(),
             // TODO: Custom loss function
             loss: tf.losses.absoluteDifference,
             metrics: ['accuracy'],
@@ -322,6 +322,7 @@ export class Model {
             callbacks: tf.callbacks.earlyStopping({
                 monitor: 'loss',
                 patience: this.opts.earlyStop,
+                // restoreBestWeights: true,
             }),
         });
         log.info('Training finished with accuracy:', history.acc.pop());
