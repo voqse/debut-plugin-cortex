@@ -295,11 +295,11 @@ export class Model {
 
     async training() {
         try {
-            log.debug('Looking for existing model...');
+            log.info('Looking for existing model...');
             await this.loadModel();
             log.debug('Existing model loaded');
         } catch (e) {
-            log.debug('No model found. Creating new one...');
+            log.info('No model found. Creating new one...');
         }
 
         this.model = this.createModel(this.opts);

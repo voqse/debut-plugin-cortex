@@ -40,6 +40,23 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
     const isTraining = 'neuroTrain' in cli.getArgs<CortexPluginArgs>();
     let model: Model;
 
+    async function initModel() {
+        if (model) return;
+
+        const botData = (await cli.getBotData(this.debut.getName()))!;
+        const { loadDir = 'default', saveDir = loadDir } = opts;
+        const savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, saveDir);
+        const loadPath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, loadDir);
+
+        log.debug('Creating neural network...');
+        model = new Model({ ...opts, saveDir: savePath, loadDir: loadPath });
+
+        if (!isTraining) {
+            log.info('Loading neural network...');
+            await model.loadModel();
+        }
+    }
+
     return {
         name: 'cortex',
         api: {
@@ -53,18 +70,12 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
             log.info('Initializing plugin...');
         },
 
+        async onLearn() {
+            await initModel.apply(this);
+        },
+
         async onStart() {
-            const botData = (await cli.getBotData(this.debut.getName()))!;
-            const { loadDir = 'default', saveDir = loadDir } = opts;
-            const savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, saveDir);
-            const loadPath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, loadDir);
-
-            // log.debug('Creating neural network...');
-            model = new Model({ ...opts, saveDir: savePath, loadDir: loadPath });
-
-            if (!isTraining) {
-                await model.loadModel();
-            }
+            await initModel.apply(this);
         },
 
         async onDispose() {
@@ -73,7 +84,7 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
                 await model.training();
                 await model.saveModel();
             }
-            log.info('Shutting down plugin...');
+            // log.info('Shutting down plugin...');
         },
     };
 }
