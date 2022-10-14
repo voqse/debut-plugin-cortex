@@ -66,10 +66,6 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
             isTraining: () => isTraining,
         },
 
-        async onInit() {
-            log.info('Initializing plugin...');
-        },
-
         async onLearn() {
             await initModel.apply(this);
         },

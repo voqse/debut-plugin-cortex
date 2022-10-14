@@ -100,7 +100,15 @@ export class Model {
 
             model.add(shavedModel);
             additionalLayers?.forEach((units, index) => {
-                model.add(tf.layers.dense({ units, activation: 'relu', name: `hidden-${index + layersCount - 2}` }));
+                model.add(
+                    tf.layers.dense({
+                        units,
+                        activation: 'relu',
+                        name: `hidden-${Math.round(Math.random() * 100)
+                            .toString()
+                            .padStart(3, '0')}-${index + layersCount - 2}`,
+                    }),
+                );
             });
         } else {
             const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
@@ -305,7 +313,7 @@ export class Model {
         this.model = this.createModel(this.opts);
         this.model.summary();
         this.model.compile({
-            optimizer: tf.train.adadelta(),
+            optimizer: tf.train.adam(),
             // TODO: Custom loss function
             loss: tf.losses.absoluteDifference,
             metrics: ['accuracy'],
