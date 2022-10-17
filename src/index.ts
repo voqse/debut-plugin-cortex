@@ -43,13 +43,17 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
     async function initModel() {
         if (model) return;
 
-        const botData = (await cli.getBotData(this.debut.getName()))!;
-        const { loadDir = 'default', saveDir = loadDir } = opts;
-        const savePath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, saveDir);
-        const loadPath = path.join(botData?.src, 'cortex', this.debut.opts.ticker, loadDir);
+        const { src } = (await cli.getBotData(this.debut.getName()))!;
+        const { ticker } = this.debut.opts;
+
+        let { loadDir = 'default', saveDir = loadDir, logDir } = opts;
+
+        saveDir = path.join(src, 'cortex', ticker, saveDir);
+        loadDir = path.join(src, 'cortex', ticker, loadDir);
+        logDir = logDir && path.join(src, 'cortex', ticker, logDir);
 
         log.debug('Creating neural network...');
-        model = new Model({ ...opts, saveDir: savePath, loadDir: loadPath });
+        model = new Model({ ...opts, saveDir, loadDir, logDir });
 
         if (!isTraining) {
             log.info('Loading neural network...');

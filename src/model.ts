@@ -13,6 +13,11 @@ export interface ModelOptions extends LoggerOptions {
     saveDir: string;
     loadDir: string;
 
+    /**
+     * Logging to tensorboard.
+     * Use the command to bring up tensorboard server: tensorboard --logdir
+     */
+    logDir?: string;
     segmentsCount?: number;
     /**
      * Size of window in candles for prediction.
@@ -64,6 +69,7 @@ export class Model {
     private distribution: DistributionSegment[][] = [];
     private prevCandle: Candle[] = [];
     private input: number[][] = [];
+    private callback = [];
 
     constructor(opts: ModelOptions) {
         const defaultOpts: Partial<ModelOptions> = {
@@ -77,6 +83,28 @@ export class Model {
 
         this.opts = { ...defaultOpts, ...opts };
         log = logger('cortex/model', this.opts);
+
+        if (this.opts.logDir) {
+            log.info(
+                `Use the command below to bring up tensorboard server:`,
+                `\n  tensorboard --logdir ${this.opts.logDir}`,
+            );
+
+            this.callback.push(
+                tf.node.tensorBoard(this.opts.logDir, {
+                    updateFreq: 'epoch',
+                }),
+            );
+        }
+
+        if (this.opts.earlyStop) {
+            this.callback.push(
+                tf.callbacks.earlyStopping({
+                    monitor: 'loss',
+                    patience: this.opts.earlyStop,
+                }),
+            );
+        }
     }
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
@@ -115,10 +143,19 @@ export class Model {
 
             model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits, name: 'input' }));
             hiddenUnits?.forEach((units, index) => {
-                model.add(tf.layers.dense({ units, activation: 'relu', name: `hidden-${index}` }));
+                model.add(
+                    tf.layers.dense({
+                        units,
+                        activation: 'relu',
+                        name: `hidden-${Math.round(Math.random() * 100)
+                            .toString()
+                            .padStart(3, '0')}-${index}`,
+                    }),
+                );
             });
         }
 
+        model.add(tf.layers.dropout({ rate: 0.2, name: 'dropout' }));
         model.add(tf.layers.dense({ units: outputSize, name: 'output' }));
         return model;
     }
@@ -327,11 +364,7 @@ export class Model {
             batchSize,
             epochs,
             shuffle: true,
-            callbacks: tf.callbacks.earlyStopping({
-                monitor: 'loss',
-                patience: this.opts.earlyStop,
-                // restoreBestWeights: true,
-            }),
+            callbacks: this.callback,
         });
         log.info('Training finished with accuracy:', history.acc.pop());
     }
