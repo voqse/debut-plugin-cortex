@@ -64,9 +64,9 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
     return {
         name: 'cortex',
         api: {
-            momentValue: (...candles) => model.momentValue(...candles),
-            nextValue: (...candles) => model.nextValue(...candles),
-            addTrainValue: (...candles) => model.addTrainingData(...candles),
+            momentValue: (...candles) => model.momentValue(candles),
+            nextValue: (...candles) => model.nextValue(candles),
+            addTrainValue: (...candles) => model.addTrainingData(candles),
             isTraining: () => isTraining,
         },
 

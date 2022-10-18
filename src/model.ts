@@ -26,6 +26,12 @@ export interface ModelOptions extends LoggerOptions {
      */
     inputSize?: number;
     /**
+     * Number of candles at one time step.
+     *
+     * Defaults to 1.
+     */
+    features?: number;
+    /**
      * Number of epochs with no improvement after which training will be stopped.
      *
      * Defaults to 100.
@@ -58,14 +64,15 @@ export interface ModelOptions extends LoggerOptions {
     outputSize?: number;
     batchSize?: number;
     epochs?: number;
+    dropoutRate?: number;
 }
 
 export class Model {
     private opts: ModelOptions;
     private model: tf.Sequential | tf.LayersModel;
     private pretrainedModel: tf.Sequential;
-    private dataset: RatioCandle[][] = [];
-    private trainingSet: { input: number[]; output: number[] }[] = [];
+    private datasets: RatioCandle[][] = [];
+    private trainingSet: { input: number[][]; output: number[] }[] = [];
     private distribution: DistributionSegment[][] = [];
     private prevCandle: Candle[] = [];
     private input: number[][] = [];
@@ -75,6 +82,7 @@ export class Model {
         const defaultOpts: Partial<ModelOptions> = {
             segmentsCount: 11,
             inputSize: 20,
+            features: 1,
             earlyStop: 100,
             hiddenLayers: [32, 16, 8],
             freezeLayers: true,
@@ -108,7 +116,7 @@ export class Model {
     }
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
-        const { inputSize, outputSize, hiddenLayers, additionalLayers } = opts;
+        const { inputSize, outputSize, hiddenLayers, additionalLayers, dropoutRate } = opts;
         const model = tf.sequential();
 
         if (this.pretrainedModel) {
@@ -141,7 +149,15 @@ export class Model {
         } else {
             const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
 
-            model.add(tf.layers.dense({ inputShape: [inputSize], units: inputUnits, name: 'input' }));
+            model.add(
+                tf.layers.gru({
+                    inputShape: [inputSize, this.datasets.length],
+                    units: inputUnits,
+                    name: 'input',
+                    // returnSequences: true,
+                }),
+            );
+            // model.add(tf.layers.flatten({ name: 'flatten' }));
             hiddenUnits?.forEach((units, index) => {
                 model.add(
                     tf.layers.dense({
@@ -155,18 +171,29 @@ export class Model {
             });
         }
 
-        model.add(tf.layers.dropout({ rate: 0.2, name: 'dropout' }));
+        if (dropoutRate) {
+            model.add(tf.layers.dropout({ rate: dropoutRate, name: 'dropout' }));
+        }
         model.add(tf.layers.dense({ units: outputSize, name: 'output' }));
         return model;
     }
 
-    addTrainingData(...candles: Candle[]): void {
+    /**
+     * Accumulate data for future training.
+     *
+     * Right way is to provide all the features in one time step.
+     * Desired input shape [inputSize, candles.length] ie [192, 2]
+     *
+     * @param candles
+     */
+    addTrainingData(candles: Candle[]): void {
         candles.forEach((candle, index) => {
             const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
 
             if (ratioCandle) {
-                if (!this.dataset[index]) this.dataset[index] = [];
-                this.dataset[index].push(ratioCandle);
+                if (!this.datasets[index]) this.datasets[index] = [];
+
+                this.datasets[index].push(ratioCandle);
             }
 
             this.prevCandle[index] = candle;
@@ -176,95 +203,89 @@ export class Model {
     serveTrainingData(): void {
         log.info('Preparing training data...');
 
-        const { inputSize, outputSize } = this.opts;
-        const candleInputSize = inputSize / this.dataset.length;
+        const { inputSize, outputSize, segmentsCount } = this.opts;
 
-        this.dataset.forEach((dataset, index) => {
-            this.distribution[index] = getDistribution(dataset, this.opts.segmentsCount);
+        this.datasets.forEach((dataset, featureIndex) => {
+            this.distribution[featureIndex] = getDistribution(dataset, segmentsCount);
 
-            dataset.forEach((ratioCandle) => {
-                const groupId = this.distribution[index].findIndex(
+            dataset.forEach((ratioCandle, timestepIndex) => {
+                const groupId = this.distribution[featureIndex].findIndex(
                     (group) => ratioCandle.ratio >= group.ratioFrom && ratioCandle.ratio < group.ratioTo,
                 );
                 const normalisedGroupId = this.normalize(groupId);
 
-                if (!this.input[index]) this.input[index] = [];
-                this.input[index].push(normalisedGroupId);
+                if (!this.input[timestepIndex]) this.input[timestepIndex] = [];
+                this.input[timestepIndex].push(normalisedGroupId);
             });
         });
 
-        for (
-            let windowStart = 0, windowEnd = candleInputSize;
-            windowEnd < this.input[0].length - outputSize;
-            windowEnd = ++windowStart + candleInputSize
-        ) {
-            const output = [...this.input[0]].slice(windowEnd, windowEnd + outputSize);
-            const input = this.input.map((input) => Array.from(input).slice(windowStart, windowEnd));
+        for (let start = 0; start < this.input.length - inputSize - outputSize; start++) {
+            const end = start + inputSize;
 
-            this.trainingSet.push({ input: input.flat(), output });
+            const input = this.input.slice(start, end);
+            const output = this.input.slice(end, end + outputSize).map((val) => val[0]); // Take only first feature for output value
 
-            // log.verbose(
-            //     'Input:',
-            //     `\n${input.map((row) => row.join(' ')).join('\n')}`,
-            //     `(${input.flat().length})`,
-            //     '\nOutput:',
-            //     output.join(' '),
-            //     `(${output.length})`,
-            // );
+            this.trainingSet.push({ input, output });
+
+            // console.log('Input\n', input, 'Output\n', output);
         }
     }
 
     private convertToTensor(data: typeof this.trainingSet) {
         return tf.tidy(() => {
-            tf.util.shuffle(data);
+            // tf.util.shuffle(data);
 
             const inputData = data.map((d) => d.input);
             const outputData = data.map((d) => d.output);
 
-            const inputs = tf.tensor2d(inputData);
+            const inputs = tf.tensor3d(inputData);
             const outputs = tf.tensor2d(outputData);
 
             return { inputs, outputs };
         });
     }
 
-    private getInput(...candles: Candle[]): typeof this.input {
+    private getInput(candles: Candle[]): typeof this.input {
         const input = [...this.input];
-        const singleInputSize = this.opts.inputSize / candles.length;
+        const timestep = [];
 
-        candles.forEach((candle, index) => {
-            const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
+        candles.forEach((candle, featureIndex) => {
+            const ratioCandle =
+                this.prevCandle[featureIndex] && getQuoteRatioData(candle, this.prevCandle[featureIndex]);
 
             if (ratioCandle) {
-                let groupId = this.distribution[index].findIndex(
+                let groupId = this.distribution[featureIndex].findIndex(
                     (group) => ratioCandle.ratio >= group.ratioFrom && ratioCandle.ratio < group.ratioTo,
                 );
                 if (groupId === -1) {
                     groupId =
-                        ratioCandle.ratio < this.distribution[index][0].ratioFrom
+                        ratioCandle.ratio < this.distribution[featureIndex][0].ratioFrom
                             ? 0
-                            : this.distribution[index].length - 1;
+                            : this.distribution[featureIndex].length - 1;
                 }
                 const normalisedGroupId = this.normalize(groupId);
-                if (!input[index]) input[index] = [];
-                input[index].push(normalisedGroupId);
 
-                if (input[index].length > singleInputSize) {
-                    input[index].shift();
-                }
+                timestep.push(normalisedGroupId);
             }
         });
+
+        if (timestep.length) {
+            input.push(timestep);
+
+            if (input.length > this.opts.inputSize) {
+                input.shift();
+            }
+        }
 
         return input;
     }
 
-    private getOutput(input: typeof this.input, ...candles: Candle[]): CortexForecast[] | undefined {
-        const flattenedInput = input.flat();
-
-        if (flattenedInput.length === this.opts.inputSize) {
+    private getOutput(input: typeof this.input, candles: Candle[]): CortexForecast[] | undefined {
+        if (input.length === this.opts.inputSize) {
             const forecast = tf.tidy(() => {
-                const input = tf.tensor2d(flattenedInput, [1, flattenedInput.length]);
-                const prediction = this.pretrainedModel.predict(input) as tf.Tensor;
+                const inputTensor = tf.tensor2d(input).expandDims(0);
+                // console.log(input.length);
+                const prediction = this.pretrainedModel.predict(inputTensor) as tf.Tensor;
                 return Array.from(prediction.dataSync());
             });
 
@@ -280,15 +301,6 @@ export class Model {
                 output.push(getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo));
             }
 
-            // log.verbose(
-            //     'Input:',
-            //     `\n${input.map((row) => row.join(' ')).join('\n')}`,
-            //     `(${input.flat().length})`,
-            //     '\nOutput:',
-            //     output.join(' '),
-            //     `(${output.length})`,
-            // );
-
             return output;
         }
     }
@@ -296,22 +308,22 @@ export class Model {
     /**
      * Get forecast at the moment
      */
-    momentValue(...candles: Candle[]) {
-        const input = this.getInput(...candles);
+    momentValue(candles: Candle[]) {
+        const input = this.getInput(candles);
 
-        return this.getOutput(input, ...candles);
+        return this.getOutput(input, candles);
     }
 
     /**
      * Run forecast
      */
-    nextValue(...candles: Candle[]) {
-        this.input = this.getInput(...candles);
+    nextValue(candles: Candle[]) {
+        this.input = this.getInput(candles);
         candles.forEach((candle, index) => {
             this.prevCandle[index] = candle;
         });
 
-        return this.getOutput(this.input, ...candles);
+        return this.getOutput(this.input, candles);
     }
 
     async saveModel() {
@@ -339,6 +351,7 @@ export class Model {
     }
 
     async training() {
+        log.debug('Training set length:', this.trainingSet.length);
         try {
             log.info('Looking for existing model...');
             await this.loadModel();
@@ -363,7 +376,7 @@ export class Model {
         const { history } = await this.model.fit(inputs, outputs, {
             batchSize,
             epochs,
-            shuffle: true,
+            // shuffle: true,
             callbacks: this.callback,
         });
         log.info('Training finished with accuracy:', history.acc.pop());
