@@ -15,8 +15,10 @@ export interface CortexPluginArgs {
 }
 
 export interface CortexPluginOptions extends LoggerOptions, Partial<ModelOptions> {
-    saveDir?: string;
-    loadDir?: string;
+    /**
+     * Whether or not generate logs for tensorboard
+     */
+    tensorboard?: boolean;
 }
 
 interface CortexPluginMethods {
@@ -46,11 +48,11 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
         const { src } = (await cli.getBotData(this.debut.getName()))!;
         const { ticker } = this.debut.opts;
 
-        let { loadDir = 'default', saveDir = loadDir, logDir } = opts;
+        let { loadDir = 'default', saveDir = loadDir, tensorboard } = opts;
 
         saveDir = path.join(src, 'cortex', ticker, saveDir);
         loadDir = path.join(src, 'cortex', ticker, loadDir);
-        logDir = logDir && path.join(src, 'cortex', ticker, logDir);
+        const logDir = tensorboard && path.join(saveDir, 'logs');
 
         log.debug('Creating neural network...');
         model = new Model({ ...opts, saveDir, loadDir, logDir });
@@ -84,7 +86,6 @@ export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
                 await model.training();
                 await model.saveModel();
             }
-            // log.info('Shutting down plugin...');
         },
     };
 }

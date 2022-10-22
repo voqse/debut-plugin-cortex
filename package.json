@@ -28,7 +28,7 @@
         "@debut/plugin-utils": "^2.0.0"
     },
     "dependencies": {
-        "@tensorflow/tfjs-node": "^3.20.0",
+        "@tensorflow/tfjs-node": "^4.0.0",
         "@voqse/logger": "^1.0.6"
     },
     "devDependencies": {

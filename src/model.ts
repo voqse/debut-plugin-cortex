@@ -9,13 +9,17 @@ import path from 'path';
 
 let log: LoggerInterface;
 
+export interface Layer {
+    type: 'dense' | 'gru';
+    units: number;
+}
+
 export interface ModelOptions extends LoggerOptions {
     saveDir: string;
     loadDir: string;
 
     /**
-     * Logging to tensorboard.
-     * Use the command to bring up tensorboard server: tensorboard --logdir
+     * Logging directory for tensorboard.
      */
     logDir?: string;
     segmentsCount?: number;
@@ -30,7 +34,7 @@ export interface ModelOptions extends LoggerOptions {
      *
      * Defaults to 1.
      */
-    features?: number;
+    // features?: number;
     /**
      * Number of epochs with no improvement after which training will be stopped.
      *
@@ -42,11 +46,13 @@ export interface ModelOptions extends LoggerOptions {
      *
      * Defaults to [32, 16, 8].
      */
-    hiddenLayers?: number[];
+    rnnLayers?: number[];
+    nnLayers?: number[];
+    layers?: Layer[];
     /**
      * Array of positive integers, defines layers to add to existing model in next training.
      *
-     * Defaults to [32, 16, 8].
+     * Defaults to undefined.
      */
     additionalLayers?: number[];
     /**
@@ -82,9 +88,9 @@ export class Model {
         const defaultOpts: Partial<ModelOptions> = {
             segmentsCount: 11,
             inputSize: 20,
-            features: 1,
-            earlyStop: 100,
-            hiddenLayers: [32, 16, 8],
+            // features: 1,
+            earlyStop: 10,
+            rnnLayers: [32, 16, 8],
             freezeLayers: true,
             outputSize: 3,
         };
@@ -108,7 +114,7 @@ export class Model {
         if (this.opts.earlyStop) {
             this.callback.push(
                 tf.callbacks.earlyStopping({
-                    monitor: 'loss',
+                    monitor: 'acc',
                     patience: this.opts.earlyStop,
                 }),
             );
@@ -116,7 +122,7 @@ export class Model {
     }
 
     private createModel(opts: Partial<ModelOptions>): typeof this.model {
-        const { inputSize, outputSize, hiddenLayers, additionalLayers, dropoutRate } = opts;
+        const { inputSize, outputSize, rnnLayers, nnLayers, additionalLayers, dropoutRate } = opts;
         const model = tf.sequential();
 
         if (this.pretrainedModel) {
@@ -147,25 +153,38 @@ export class Model {
                 );
             });
         } else {
-            const [inputUnits = inputSize, ...hiddenUnits] = hiddenLayers;
+            const [inputUnits = inputSize, ...hiddenRnnLayers] = rnnLayers;
+            const randomSeed = () =>
+                Math.round(Math.random() * 100)
+                    .toString()
+                    .padStart(3, '0');
 
             model.add(
                 tf.layers.gru({
                     inputShape: [inputSize, this.datasets.length],
                     units: inputUnits,
                     name: 'input',
-                    // returnSequences: true,
+                    returnSequences: !!hiddenRnnLayers.length,
                 }),
             );
-            // model.add(tf.layers.flatten({ name: 'flatten' }));
-            hiddenUnits?.forEach((units, index) => {
+
+            hiddenRnnLayers?.forEach((units, index) => {
+                model.add(
+                    tf.layers.gru({
+                        units,
+                        // activation: 'relu',
+                        name: `rnn-hidden-${randomSeed()}-${index}`,
+                        returnSequences: index < hiddenRnnLayers.length - 1,
+                    }),
+                );
+            });
+
+            nnLayers?.forEach((units, index) => {
                 model.add(
                     tf.layers.dense({
                         units,
                         activation: 'relu',
-                        name: `hidden-${Math.round(Math.random() * 100)
-                            .toString()
-                            .padStart(3, '0')}-${index}`,
+                        name: `nn-hidden-${randomSeed()}-${index}`,
                     }),
                 );
             });
@@ -381,6 +400,14 @@ export class Model {
         });
         log.info('Training finished with accuracy:', history.acc.pop());
     }
+
+    // private vectorize(index: number): number[] {
+    //     const { segmentsCount } = this.opts;
+    //     const vector = new Array(segmentsCount).fill(0);
+    //
+    //     vector[index] = 1;
+    //     return vector;
+    // }
 
     private normalize(groupId: number) {
         return groupId / this.opts.segmentsCount;
