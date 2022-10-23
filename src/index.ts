@@ -4,13 +4,13 @@ import { cli } from '@debut/plugin-utils';
 import path from 'path';
 import { Model, ModelOptions } from './model';
 
-export interface CortexForecast {
+export interface Forecast {
     low: number;
     high: number;
     avg: number;
 }
 
-export interface CortexPluginArgs {
+export interface Args {
     neuroTrain: boolean;
 }
 
@@ -22,8 +22,8 @@ export interface CortexPluginOptions extends LoggerOptions, Partial<ModelOptions
 }
 
 interface CortexPluginMethods {
-    momentValue(...candles: Candle[]): CortexForecast[] | undefined;
-    nextValue(...candles: Candle[]): CortexForecast[] | undefined;
+    momentValue(...candles: Candle[]): Forecast[] | undefined;
+    nextValue(...candles: Candle[]): Forecast[] | undefined;
     addTrainValue(...candles: Candle[]): void;
     isTraining(): boolean;
 }
@@ -39,7 +39,7 @@ export interface CortexPluginAPI {
 
 export function cortexPlugin(opts: CortexPluginOptions): CortexPluginInterface {
     const log = logger('cortex', opts);
-    const isTraining = 'neuroTrain' in cli.getArgs<CortexPluginArgs>();
+    const isTraining = 'neuroTrain' in cli.getArgs<Args>();
     let model: Model;
 
     async function initModel() {

@@ -1,6 +1,6 @@
 import { Candle } from '@debut/types';
 import { math } from '@debut/plugin-utils';
-import { CortexForecast } from './index';
+import { Forecast } from './index';
 
 /**
  * Special candle format with ratio instead value
@@ -93,7 +93,7 @@ export function getDistribution(ratioCandles: RatioCandle[], segmentsCount = 6, 
     return segments;
 }
 
-export function getPredictPrices(price: number, ratioFrom: number, ratioTo: number): CortexForecast {
+export function getPredictPrices(price: number, ratioFrom: number, ratioTo: number): Forecast {
     const low = price * ratioFrom;
     const high = price * ratioTo;
     const avg = (low + high) / 2;
