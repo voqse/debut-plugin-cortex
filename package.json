@@ -29,6 +29,7 @@
     },
     "dependencies": {
         "@tensorflow/tfjs-node": "^4.0.0",
+        "@tensorflow/tfjs-node-gpu": "^4.0.0",
         "@voqse/logger": "^1.0.6"
     },
     "devDependencies": {

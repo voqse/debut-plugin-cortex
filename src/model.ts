@@ -3,10 +3,12 @@ import { Candle } from '@debut/types';
 import { file } from '@debut/plugin-utils';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
 import { Forecast } from './index';
-import * as tf from '@tensorflow/tfjs-node';
+import { Sequential, LayersModel, Tensor } from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-cpu';
 import { ActivationIdentifier } from '@tensorflow/tfjs-layers/dist/keras_format/activation_config';
 import path from 'path';
+
+let tf;
 
 let log: LoggerInterface;
 
@@ -20,6 +22,7 @@ export interface Layer {
 export type Dataset = { input: number[][]; output: number[] };
 
 export interface ModelOptions extends LoggerOptions {
+    gpu?: boolean;
     saveDir: string;
     loadDir: string;
 
@@ -76,8 +79,8 @@ export interface ModelOptions extends LoggerOptions {
 
 export class Model {
     private opts: ModelOptions;
-    private model: tf.Sequential | tf.LayersModel;
-    private pretrainedModel: tf.Sequential;
+    private model: Sequential | LayersModel;
+    private pretrainedModel: Sequential;
     private datasets: RatioCandle[][] = [];
     private trainingSet: Dataset[] = [];
     private validationSet: Dataset[] = [];
@@ -98,33 +101,12 @@ export class Model {
         this.opts = { ...defaultOpts, ...opts };
         log = logger('cortex/model', this.opts);
 
-        // Save model every epoch
-        // this.callback.push(
-        //     new tf.CustomCallback({
-        //         onEpochEnd: this.saveModel,
-        //     }),
-        // );
-
-        if (this.opts.logDir) {
-            log.info(
-                `Use the command below to bring up tensorboard server:`,
-                `\n  tensorboard --logdir ${this.opts.logDir}`,
-            );
-
-            this.callback.push(
-                tf.node.tensorBoard(this.opts.logDir, {
-                    updateFreq: 'epoch',
-                }),
-            );
-        }
-
-        if (this.opts.earlyStop) {
-            this.callback.push(
-                tf.callbacks.earlyStopping({
-                    monitor: this.opts.validationSize ? 'val_acc' : 'acc',
-                    patience: this.opts.earlyStop,
-                }),
-            );
+        if (this.opts.gpu) {
+            log.info('Using GPU for training');
+            tf = require('@tensorflow/tfjs-node-gpu');
+        } else {
+            log.info('Using CPU for training');
+            tf = require('@tensorflow/tfjs-node');
         }
     }
 
@@ -160,20 +142,10 @@ export class Model {
                 );
             });
         } else {
-            // const [inputUnits = inputSize, ...hiddenRnnLayers] = rnnLayers;
             const randomSeed = () =>
                 Math.round(Math.random() * 100)
                     .toString()
                     .padStart(3, '0');
-
-            // model.add(
-            //     tf.layers.gru({
-            //         inputShape: [inputSize, this.datasets.length],
-            //         units: inputUnits,
-            //         name: 'input',
-            //         returnSequences: !!hiddenRnnLayers.length,
-            //     }),
-            // );
 
             const [inputLayer, ...hiddenLayers] = layers;
             const { type, ...args } = inputLayer;
@@ -198,26 +170,6 @@ export class Model {
                     }),
                 );
             });
-
-            // hiddenRnnLayers?.forEach((units, index) => {
-            //     model.add(
-            //         tf.layers.gru({
-            //             units,
-            //             name: `rnn-hidden-${randomSeed()}-${index}`,
-            //             returnSequences: index < hiddenRnnLayers.length - 1,
-            //         }),
-            //     );
-            // });
-
-            // nnLayers?.forEach((units, index) => {
-            //     model.add(
-            //         tf.layers.dense({
-            //             units,
-            //             activation: 'relu',
-            //             name: `nn-hidden-${randomSeed()}-${index}`,
-            //         }),
-            //     );
-            // });
         }
 
         if (dropoutRate) {
@@ -350,7 +302,7 @@ export class Model {
         if (input.length === this.opts.inputSize) {
             const output = tf.tidy(() => {
                 const inputTensor = tf.tensor2d(input).expandDims(0);
-                const prediction = this.pretrainedModel.predict(inputTensor) as tf.Tensor;
+                const prediction = this.pretrainedModel.predict(inputTensor) as Tensor;
 
                 return Array.from(prediction.dataSync());
             });
@@ -409,7 +361,7 @@ export class Model {
         }
 
         this.distribution = JSON.parse(groupsData);
-        this.pretrainedModel = <tf.Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
+        this.pretrainedModel = <Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
     }
 
     async training() {
@@ -424,6 +376,36 @@ export class Model {
 
         this.model = this.createModel(this.opts);
         this.model.summary();
+
+        // Save model every epoch
+        // this.callback.push(
+        //     new tf.CustomCallback({
+        //         onEpochEnd: this.saveModel,
+        //     }),
+        // );
+
+        if (this.opts.logDir) {
+            log.info(
+                `Use the command below to bring up tensorboard server:`,
+                `\n  tensorboard --logdir ${this.opts.logDir}`,
+            );
+
+            this.callback.push(
+                tf.node.tensorBoard(this.opts.logDir, {
+                    updateFreq: 'epoch',
+                }),
+            );
+        }
+
+        if (this.opts.earlyStop) {
+            this.callback.push(
+                tf.callbacks.earlyStopping({
+                    monitor: this.opts.validationSize ? 'val_acc' : 'acc',
+                    patience: this.opts.earlyStop,
+                }),
+            );
+        }
+
         this.model.compile({
             optimizer: tf.train.adam(),
             loss: tf.losses.absoluteDifference,
