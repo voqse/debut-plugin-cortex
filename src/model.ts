@@ -147,14 +147,12 @@ export class Model {
 
             const [inputLayer, ...hiddenLayers] = layers;
             const { type, ...args } = inputLayer;
-            const returnSequences = hiddenLayers[0]?.type === 'gru' || undefined;
 
             model.add(
                 tf.layers[type]({
-                    ...args,
                     inputShape: [inputSize, this.datasets.length],
-                    returnSequences,
                     name: `input`,
+                    ...args,
                 }),
             );
 
@@ -163,18 +161,18 @@ export class Model {
 
                 model.add(
                     tf.layers[type]({
-                        ...args,
                         name: `hidden-${randomSeed()}-${index}`,
+                        ...args,
                     }),
                 );
             });
         }
 
         if (dropoutRate) {
-            model.add(tf.layers.dropout({ rate: dropoutRate, name: 'dropout' }));
+            model.add(tf.layers.dropout({ name: 'dropout', rate: dropoutRate }));
         }
 
-        model.add(tf.layers.dense({ units: outputSize, name: 'output' }));
+        model.add(tf.layers.dense({ name: 'output', units: outputSize }));
 
         return model;
     }
