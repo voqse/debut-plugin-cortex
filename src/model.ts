@@ -3,13 +3,12 @@ import { Candle } from '@debut/types';
 import { file } from '@debut/plugin-utils';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
 import { Forecast } from './index';
-import { Sequential, LayersModel, Tensor } from '@tensorflow/tfjs';
+import tfn, { Sequential, Tensor } from '@tensorflow/tfjs-node';
 import '@tensorflow/tfjs-backend-cpu';
 import { ActivationIdentifier } from '@tensorflow/tfjs-layers/dist/keras_format/activation_config';
 import path from 'path';
 
-let tf;
-
+let tf: typeof tfn;
 let log: LoggerInterface;
 
 export interface Layer {
@@ -79,7 +78,7 @@ export interface ModelOptions extends LoggerOptions {
 
 export class Model {
     private opts: ModelOptions;
-    private model: Sequential | LayersModel;
+    private model: Sequential;
     private pretrainedModel: Sequential;
     private datasets: RatioCandle[][] = [];
     private trainingSet: Dataset[] = [];
@@ -123,7 +122,10 @@ export class Model {
             log.info('Additional layers provided. Inserting...');
 
             const outputLayer = this.pretrainedModel.getLayer(undefined, layersCount - 2);
-            const shavedModel = tf.model({ inputs: this.pretrainedModel.inputs, outputs: outputLayer.output });
+            const shavedModel = tf.model({
+                inputs: this.pretrainedModel.inputs,
+                outputs: outputLayer.output,
+            }) as Sequential;
 
             this.pretrainedModel.layers.forEach((layer) => {
                 layer.trainable = !this.opts.freezeLayers;
