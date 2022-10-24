@@ -3,19 +3,15 @@ import { Candle } from '@debut/types';
 import { file } from '@debut/plugin-utils';
 import { DistributionSegment, getDistribution, getPredictPrices, getQuoteRatioData, RatioCandle } from './utils';
 import { Forecast } from './index';
-import tfn, { Sequential, Tensor } from '@tensorflow/tfjs-node';
-import '@tensorflow/tfjs-backend-cpu';
-import { ActivationIdentifier } from '@tensorflow/tfjs-layers/dist/keras_format/activation_config';
+import tfn, { Sequential, Tensor, GRULayerArgs } from '@tensorflow/tfjs-node';
 import path from 'path';
 
 let tf: typeof tfn;
 let log: LoggerInterface;
 
-export interface Layer {
+export interface Layer extends Partial<GRULayerArgs> {
     type: 'dense' | 'gru';
     units: number;
-    activation?: ActivationIdentifier;
-    recurrentActivation?: ActivationIdentifier;
 }
 
 export type Dataset = { input: number[][]; output: number[] };
