@@ -6,8 +6,25 @@ import { Forecast } from './index';
 import tfn, { Sequential, Tensor, GRULayerArgs } from '@tensorflow/tfjs-node';
 import path from 'path';
 
+/**
+ * TODO: 1. Refactor dataset into readable array of objects
+ *       2. Make batch standardisation function
+ *       3. Pass whole candle data as features
+ */
+
 let tf: typeof tfn;
 let log: LoggerInterface;
+
+type NormCandle = Partial<Candle>;
+type Range = {
+    min: number;
+    max: number;
+};
+type CandleRange = {
+    p: Range;
+    v: Range;
+};
+type NormBundle = { candles: NormCandle[]; range: CandleRange };
 
 export interface Layer extends Partial<GRULayerArgs> {
     type: 'dense' | 'gru';
@@ -73,16 +90,17 @@ export interface ModelOptions extends LoggerOptions {
 }
 
 export class Model {
-    private opts: ModelOptions;
+    private readonly opts: ModelOptions;
     private model: Sequential;
     private pretrainedModel: Sequential;
-    private datasets: RatioCandle[][] = [];
+    private candlesData: Candle[][] = [];
     private trainingSet: Dataset[] = [];
     private validationSet: Dataset[] = [];
     private distribution: DistributionSegment[][] = [];
     private prevCandle: Candle[] = [];
     private input: number[][] = [];
     private callback = [];
+    private lastRange = [];
 
     constructor(opts: ModelOptions) {
         const defaultOpts: Partial<ModelOptions> = {
@@ -150,7 +168,7 @@ export class Model {
 
             model.add(
                 tf.layers[type]({
-                    inputShape: [inputSize, this.datasets.length],
+                    inputShape: [inputSize, this.candlesData.length * 4],
                     name: `input`,
                     ...args,
                 }),
@@ -187,36 +205,14 @@ export class Model {
      */
     addTrainingData(candles: Candle[]): void {
         candles.forEach((candle, index) => {
-            const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
-
-            if (ratioCandle) {
-                if (!this.datasets[index]) this.datasets[index] = [];
-
-                this.datasets[index].push(ratioCandle);
-            }
-
-            this.prevCandle[index] = candle;
+            if (!this.candlesData[index]) this.candlesData[index] = [];
+            this.candlesData[index].push(candle);
         });
     }
 
     serveTrainingData(): void {
         log.info('Preparing training data...');
-
-        const { inputSize, outputSize, segmentsCount, validationSize } = this.opts;
-
-        this.datasets.forEach((dataset, featureIndex) => {
-            this.distribution[featureIndex] = getDistribution(dataset, segmentsCount);
-
-            dataset.forEach((ratioCandle, timestepIndex) => {
-                const groupId = this.distribution[featureIndex].findIndex(
-                    (group) => ratioCandle.ratio >= group.ratioFrom && ratioCandle.ratio < group.ratioTo,
-                );
-                const normalisedGroupId = this.normalize(groupId);
-
-                if (!this.input[timestepIndex]) this.input[timestepIndex] = [];
-                this.input[timestepIndex].push(normalisedGroupId);
-            });
-        });
+        const { inputSize, outputSize, validationSize } = this.opts;
 
         this.fillTrainingSet(inputSize, outputSize);
 
@@ -225,13 +221,29 @@ export class Model {
     }
 
     private fillTrainingSet(inputSize: number, outputSize: number): void {
-        for (let start = 0; start < this.input.length - inputSize - outputSize; start++) {
-            const end = start + inputSize;
+        const [mainCandleSet, ...corrCandleSets] = this.candlesData;
 
-            const input = this.input.slice(start, end);
-            const output = this.input.slice(end, end + outputSize).map((val) => val[0]); // Take only first feature for output value
+        for (let start = 0; start < mainCandleSet.length - inputSize - outputSize; start++) {
+            const end = start + inputSize;
+            const flat = ({ h, l, c, v }: NormCandle) => [h, l, c, v];
+
+            const { candles: normInputCandles, range } = this.scaleCandleSet(mainCandleSet.slice(start, end));
+            const normCorrCandles = corrCandleSets.map((candleSet) => {
+                const bundle = candleSet.slice(start, end);
+                return this.scaleCandleSet(bundle).candles;
+            });
+
+            // const input = [flat(normInputCandles), ...flat(normCorrCandles)];
+            const input = normInputCandles.map((inputCandle, index) => {
+                return [...flat(inputCandle), ...flat(normCorrCandles[0][index])];
+            });
+            const output = mainCandleSet
+                .slice(end, end + outputSize)
+                .map((candle) => this.scaleCandle(candle, range).c);
 
             this.trainingSet.push({ input, output });
+
+            // log.debug(`Input (${input.length}, ${input[0].length}):\n`, input, `\nOutput (${output.length})\n`, output);
         }
     }
 
@@ -242,6 +254,43 @@ export class Model {
 
             this.validationSet.push(item);
         }
+    }
+
+    private scaleCandle({ o, h, l, c, v }: Candle, { p, v: vl }: CandleRange) {
+        // Clamp function for prediction normalization
+        // needed due output can go outside of window range
+        const clamp = (num) => Math.min(Math.max(num, 0), 1);
+        const scale = (num, min, max) => clamp((num - min) / (max - min));
+
+        return {
+            o: scale(o, p.min, p.max),
+            h: scale(h, p.min, p.max),
+            l: scale(l, p.min, p.max),
+            c: scale(c, p.min, p.max),
+            v: scale(v, vl.min, vl.max),
+        };
+    }
+
+    private scaleCandleSet(candles: Candle[]): NormBundle {
+        const hs = candles.map(({ h }) => h);
+        const ls = candles.map(({ l }) => l);
+        const vs = candles.map(({ v }) => v);
+
+        const range = {
+            p: {
+                min: Math.min(...ls),
+                max: Math.max(...hs),
+            },
+            v: {
+                min: Math.min(...vs),
+                max: Math.max(...vs),
+            },
+        };
+
+        return {
+            candles: candles.map((candle) => this.scaleCandle(candle, range)),
+            range,
+        };
     }
 
     private convertToTensor(data: Dataset[]) {
@@ -260,56 +309,54 @@ export class Model {
         });
     }
 
-    private getInput(candles: Candle[]): typeof this.input {
-        const input = [...this.input];
-        const timestep = [];
+    private getInput(candles: Candle[]): typeof this.candlesData {
+        const input = [...this.candlesData];
+        // const timestep = [];
 
         candles.forEach((candle, index) => {
-            const ratioCandle = this.prevCandle[index] && getQuoteRatioData(candle, this.prevCandle[index]);
+            if (!input[index]) input[index] = [];
+            input[index].push(candle);
 
-            if (ratioCandle) {
-                let groupId = this.distribution[index].findIndex(
-                    (group) => ratioCandle.ratio >= group.ratioFrom && ratioCandle.ratio < group.ratioTo,
-                );
-
-                if (groupId === -1) {
-                    groupId =
-                        ratioCandle.ratio < this.distribution[index][0].ratioFrom
-                            ? 0
-                            : this.distribution[index].length - 1;
-                }
-
-                timestep.push(this.normalize(groupId));
+            if (input[index].length > this.opts.inputSize) {
+                input[index].shift();
             }
         });
 
-        if (timestep.length) {
-            input.push(timestep);
-
-            if (input.length > this.opts.inputSize) {
-                input.shift();
-            }
-        }
+        // if (timestep.length) {
+        //     input.push(timestep);
+        //
+        //     if (input.length > this.opts.inputSize) {
+        //         input.shift();
+        //     }
+        // }
 
         return input;
     }
 
-    private getForecast(input: typeof this.input, candles: Candle[]): Forecast[] | undefined {
-        if (input.length === this.opts.inputSize) {
-            const output = tf.tidy(() => {
-                const inputTensor = tf.tensor2d(input).expandDims(0);
-                const prediction = this.pretrainedModel.predict(inputTensor) as Tensor;
+    private getForecast(input: typeof this.candlesData, candles: Candle[]): Forecast[] | undefined {
+        if (input[0].length === this.opts.inputSize) {
+            // TODO: prepareInput affects inner value. Do not use for momentValue
+            const normalized = [];
 
-                return Array.from(prediction.dataSync());
+            this.candlesData.forEach((candleSet, index) => {
+                const { candles, range } = this.scaleCandleSet(candleSet);
+                this.lastRange[index] = range;
+
+                candles.forEach(({ h, l, c, v }, candleIndex) => {
+                    if (!normalized[candleIndex]) normalized[candleIndex] = [];
+                    normalized[candleIndex].push(h, l, c, v);
+                });
             });
 
-            return output.map((forecast) => {
-                const denormalized = this.denormalize(forecast);
-                const group = this.distribution[0][denormalized];
+            // console.log(normalized);
 
-                if (!group) return;
+            return tf.tidy(() => {
+                const inputTensor = tf.tensor3d([normalized], [1, this.opts.inputSize, this.candlesData.length * 4]);
+                const forecast = this.pretrainedModel.predict(inputTensor) as Tensor;
+                const normForecast = Array.from(forecast.dataSync());
 
-                return getPredictPrices(candles[0].c, group.ratioFrom, group.ratioTo);
+                const { min, max } = this.lastRange[0].p;
+                return normForecast.map((item) => item * (max - min) + min);
             });
         }
     }
@@ -327,53 +374,52 @@ export class Model {
      * Run forecast
      */
     nextValue(candles: Candle[]) {
-        this.input = this.getInput(candles);
+        this.candlesData = this.getInput(candles);
+        // console.log('Data', this.candlesData[0].length);
 
-        candles.forEach((candle, index) => {
-            this.prevCandle[index] = candle;
-        });
-
-        return this.getForecast(this.input, candles);
+        return this.getForecast(this.candlesData, candles);
     }
 
     async saveModel() {
         const { saveDir } = this.opts;
-        const groupsFile = 'groups.json';
-
-        file.ensureFile(path.resolve(saveDir, groupsFile));
-        file.saveFile(path.resolve(saveDir, groupsFile), this.distribution);
+        // const groupsFile = 'groups.json';
+        //
+        // file.ensureFile(path.resolve(saveDir, groupsFile));
+        // file.saveFile(path.resolve(saveDir, groupsFile), this.distribution);
 
         await this.model.save(`file://${path.resolve(saveDir)}`);
     }
 
     async loadModel() {
         const { loadDir } = this.opts;
-        const groupsFile = 'groups.json';
-        const groupsData = file.readFile(path.resolve(loadDir, groupsFile));
+        // const groupsFile = 'groups.json';
+        // const groupsData = file.readFile(path.resolve(loadDir, groupsFile));
+        //
+        // if (!groupsData) {
+        //     throw `Unknown data in ${groupsFile}, or file does not exists, please run training before use`;
+        //     // process.exit(0);
+        // }
+        //
+        // this.distribution = JSON.parse(groupsData);
+        log.info('Looking for existing model...');
 
-        if (!groupsData) {
-            throw `Unknown data in ${groupsFile}, or file does not exists, please run training before use`;
-            // process.exit(0);
-        }
-
-        this.distribution = JSON.parse(groupsData);
-        this.pretrainedModel = <Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
-    }
-
-    async training() {
-        log.debug('Training set length:', this.trainingSet.length);
         try {
-            log.info('Looking for existing model...');
-            await this.loadModel();
+            this.pretrainedModel = <Sequential>await tf.loadLayersModel(`file://${path.resolve(loadDir)}/model.json`);
             log.debug('Existing model loaded');
         } catch (e) {
             log.info('No model found. Creating new one...');
         }
+    }
+
+    async training() {
+        log.debug('Training set length:', this.trainingSet.length);
+        await this.loadModel();
 
         this.model = this.createModel(this.opts);
         this.model.summary();
 
-        // Save model every epoch
+        // Save model every epoch. Upd: this will not work
+        // just as example.
         // this.callback.push(
         //     new tf.CustomCallback({
         //         onEpochEnd: this.saveModel,
@@ -424,11 +470,11 @@ export class Model {
         log.info('Training finished with accuracy:', history.acc.pop());
     }
 
-    private normalize(groupId: number) {
-        return groupId / this.opts.segmentsCount;
-    }
-
-    private denormalize(value: number) {
-        return Math.min(Math.round(value * this.opts.segmentsCount), this.opts.segmentsCount - 1);
-    }
+    // private normalize(groupId: number) {
+    //     return groupId / this.opts.segmentsCount;
+    // }
+    //
+    // private denormalize(value: number) {
+    //     return Math.min(Math.round(value * this.opts.segmentsCount), this.opts.segmentsCount - 1);
+    // }
 }
